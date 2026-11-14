@@ -1,6 +1,7 @@
 {
   "rules": {
     "users": {
+      ".read": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
       "$uid": {
         ".read": "auth != null",
         ".write": "auth != null && auth.uid === $uid",
@@ -41,6 +42,21 @@
         "title": {
           ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20 && newData.val().matches(/^[a-z_]+$/)"
         },
+        "avatarV": {
+          ".validate": "newData.isString() && newData.val().length >= 6 && newData.val().length <= 40 && newData.val().matches(/^[a-f0-9]+$/)"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "avatars": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        "data": {
+          ".validate": "newData.isString() && newData.val().beginsWith('data:image/jpeg;base64,') && newData.val().length <= 60000"
+        },
         "$other": {
           ".validate": false
         }
@@ -54,6 +70,7 @@
       }
     },
     "presence": {
+      ".read": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || root.child('friends').child($uid).child(auth.uid).exists())",
         ".write": "auth != null && auth.uid === $uid",
@@ -89,6 +106,7 @@
       }
     },
     "cards": {
+      ".read": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || root.child('friends').child($uid).child(auth.uid).exists())",
         ".write": "auth != null && auth.uid === $uid",
@@ -168,6 +186,26 @@
             ".validate": false
           }
         },
+        "showcase": {
+          "$i": {
+            ".validate": "$i.matches(/^[0-4]$/) && newData.hasChildren(['name', 'tier'])",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 60"
+            },
+            "icon": {
+              ".validate": "newData.isString() && newData.val().length <= 20 && newData.val().matches(/^[a-z_]+$/)"
+            },
+            "tier": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4"
+            },
+            "kind": {
+              ".validate": "newData.val() === 'secret' || newData.val() === 'ultimate'"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
         "records": {
           "longestMin": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
@@ -209,6 +247,7 @@
       }
     },
     "friends": {
+      ".read": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         "$fid": {
@@ -249,6 +288,40 @@
       },
       "$other": {
         ".validate": false
+      }
+    },
+    "weekly": {
+      "$week": {
+        ".read": "auth != null",
+        ".indexOn": ["hours"],
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid && $week.matches(/^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$/)",
+          ".validate": "newData.hasChildren(['name', 'hours', 'at'])",
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 40"
+          },
+          "photo": {
+            ".validate": "newData.isString() && newData.val().beginsWith('https://') && newData.val().length <= 500"
+          },
+          "frame": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20 && newData.val().matches(/^[a-z0-9_]+$/)"
+          },
+          "title": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20 && newData.val().matches(/^[a-z_]+$/)"
+          },
+          "level": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999"
+          },
+          "hours": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 168"
+          },
+          "at": {
+            ".validate": "newData.val() === now"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
       }
     },
     "grants": {

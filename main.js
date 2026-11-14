@@ -104,6 +104,7 @@ function announceChallenges(r) {
     if (!Notification.isSupported()) return;
     const xp = r.completed.reduce((a, c) => a + c.xp, 0);
     const sx = (n) => `${n >= 0 ? '+' : '−'}${Math.abs(n)} XP`;
+    if (!r.levelUp && r.completed.every((c) => c.kind === 'wheel')) return; // shown by the wheel itself
     const admin = r.completed.some((c) => c.kind === 'admin');
     const n = new Notification({
       title: r.levelUp ? `Niveau ${r.levelUp.to} atteint !${r.levelUp.rankUp ? ` Badge ${r.levelUp.rankName} débloqué` : ''}` : admin ? `XP de l'administrateur : ${sx(xp)}` : `Défi terminé : ${sx(xp)}`,
@@ -113,6 +114,16 @@ function announceChallenges(r) {
     n.on('click', () => { if (win) { win.show(); win.focus(); send('challenges:open'); } });
     n.show();
   } catch { /* ignore */ }
+}
+
+/** Wheel XP waiting to be added (also picked up at the next start if Linkgeek closed meanwhile). */
+function payWheelXp() {
+  const w = shop && shop.data.wheel;
+  if (!w || !(w.pendingXp > 0)) return;
+  const n = w.pendingXp;
+  w.pendingXp = 0;
+  store.save();
+  challenges.grant({ xp: n, title: `Roulette : ${n} XP`, kind: 'wheel' });
 }
 
 /** Admin gifts: "title_<key>" gives a profile title, anything else is a trophy. */
@@ -132,7 +143,7 @@ function announceAchievements(list) {
     if (!Notification.isSupported()) return;
     const first = list[list.length - 1];
     const n = new Notification({
-      title: list.length > 1 ? `${list.length} succès débloqués !` : `Succès ${first.tierName} débloqué !`,
+      title: list.length > 1 ? `${list.length} trophées débloqués !` : `Trophée ${first.tierName} débloqué !`,
       body: `${first.name} — ${first.desc}`,
       icon: path.join(__dirname, 'assets', 'icon.png'),
     });
@@ -236,6 +247,8 @@ function getProfile() {
   const seen = Object.values(store.data.firstSeen || {});
   return {
     name: p.name || base.name || 'Joueur', avatar, customAvatar: !!p.avatar, steamName: base.name || null, top5,
+    // the window makes a small JPEG of a custom picture so friends can see it (see profile:setAvatarShare)
+    needsAvatarShare: !!(p.avatar && fs.existsSync(p.avatar) && !(p.avatarShare && p.avatarShare.src === (p.avatarV || 0))),
     account: acc ? { email: acc.email, name: acc.name } : null,
     level: challenges ? challenges.levelInfo() : null,
     ranks: challenges ? challenges.ranks() : RANKS,
@@ -252,7 +265,22 @@ function getProfile() {
     frame: frameFor(p.frame),
     title: titles ? titles.equipped() : null,
     frameChoice: p.frame || 'auto',
+    showcase: showcaseFor(p, a),
   };
+}
+
+/** The 5 showcased achievements, resolved (a slot whose achievement is locked again shows empty). */
+function showcaseFor(p, a) {
+  const items = a ? a.items : [];
+  return Array.from({ length: 5 }, (_, i) => {
+    const k = p.showcase && p.showcase[i];
+    const it = k && items.find((x) => x.key === k && x.tier >= 1);
+    if (!it) return null;
+    const t = it.tiers[0];
+    // tier = rarity rank (1 Bronze … 4 Platine): what friends' Linkgeek uses to colour the trophy
+    const rank = { bronze: 1, silver: 2, gold: 3, platinum: 4 }[it.rarity] || 1;
+    return { key: it.key, name: it.name, icon: it.icon, kind: it.kind || (it.secret ? 'secret' : null), secret: !!it.secret, rarity: it.rarity, tier: rank, tierName: t.name, desc: t.desc, at: t.at };
+  });
 }
 
 /* ---------------- Avatar frames ----------------
@@ -281,11 +309,22 @@ function getRecords() {
   if (tracker) for (const [gameId, r] of tracker.running) sessions.push({ gameId, start: r.start, end: now });
   let longest = null;
   const days = new Set();
+  const perDay = new Map(); // day start -> ms played that day
   for (const s of sessions) {
     const len = s.end - s.start;
     if (!longest || len > longest.ms) longest = { ms: len, gameId: s.gameId, at: s.start };
-    for (let t = new Date(s.start).setHours(0, 0, 0, 0); t <= s.end; t += 86400000) days.add(dayKey(t));
+    for (let t = new Date(s.start).setHours(0, 0, 0, 0); t <= s.end; t = new Date(t + 36 * 3600000).setHours(0, 0, 0, 0)) {
+      days.add(dayKey(t));
+      const next = new Date(t + 36 * 3600000).setHours(0, 0, 0, 0);
+      const part = Math.min(s.end, next) - Math.max(s.start, t);
+      if (part > 0) perDay.set(t, (perDay.get(t) || 0) + part);
+    }
   }
+  const [bestDayAt, bestDayMs] = [...perDay].sort((x, y) => y[1] - x[1])[0] || [];
+  // most recently discovered game (first seen by Linkgeek after the first scan)
+  const seen = Object.entries(store.data.firstSeen || {});
+  const firstScan = seen.length ? Math.min(...seen.map(([, t]) => t)) : 0;
+  const [newId, newAt] = seen.filter(([, t]) => t > firstScan + 3600000).sort((x, y) => y[1] - x[1])[0] || [];
   // runs of consecutive days
   let best = 0; let run = 0; let prev = null;
   const sorted = [...days].map((k) => { const [y, mo, d] = k.split('-').map(Number); return new Date(y, mo, d).getTime(); }).sort((x, y) => x - y);
@@ -305,7 +344,45 @@ function getRecords() {
     longest: longest && longest.ms >= 60000 ? longest : null,
     streak: { current, best },
     month: { gameId: gid || null, ms: ms || 0, month: m0.getMonth(), year: m0.getFullYear() },
+    bestDay: bestDayMs >= 60000 ? { at: bestDayAt, ms: bestDayMs } : null,
+    newest: newId ? { gameId: newId, at: newAt } : null,
   };
+}
+
+/**
+ * Estimated value of the Steam library: full Steam price (France, without
+ * discounts) of each Steam game, cached 7 days. Only app ids are sent to Steam.
+ */
+const PRICE_TTL = 7 * 86400000;
+async function libraryValue(force = false) {
+  const cache = store.data.libPrices || (store.data.libPrices = {});
+  const steam = library.games().filter((g) => g.source === 'steam' && !g.hidden);
+  const ids = steam.map((g) => g.id.split(':')[1]).filter((id) => /^\d+$/.test(id));
+  const todo = ids.filter((id) => force || !cache[id] || Date.now() - cache[id].at > PRICE_TTL);
+  for (let i = 0; i < todo.length; i += 40) {
+    const chunk = todo.slice(i, i + 40);
+    try {
+      const r = await fetch(`https://store.steampowered.com/api/appdetails?appids=${chunk.join(',')}&cc=fr&filters=price_overview`, { signal: AbortSignal.timeout(15000) });
+      const j = await r.json();
+      for (const id of chunk) {
+        const d = j && j[id];
+        const p = d && d.success && d.data && d.data.price_overview;
+        cache[id] = p ? { at: Date.now(), cents: p.initial || p.final || 0, currency: p.currency || 'EUR' }
+          : { at: Date.now(), cents: d && d.success ? 0 : null, free: !!(d && d.success) };
+      }
+    } catch { /* offline: use what is cached */ }
+  }
+  store.save();
+  const items = steam.map((g) => {
+    const c = cache[g.id.split(':')[1]];
+    if (!c || c.cents === null || c.cents === undefined) return null;
+    const price = c.cents / 100;
+    const hours = (g.playtimeSec || 0) / 3600;
+    return { gameId: g.id, price, free: !c.cents, hours, perHour: hours >= 1 && price > 0 ? price / hours : null };
+  }).filter(Boolean);
+  const total = items.reduce((a, x) => a + x.price, 0);
+  const paidHours = items.filter((x) => x.price > 0).reduce((a, x) => a + x.hours, 0);
+  return { total, count: items.length, unknown: steam.length - items.length, free: items.filter((x) => x.free).length, perHour: paidHours >= 1 ? total / paidHours : null, items, at: Date.now() };
 }
 
 /* ---------------- Social links ---------------- */
@@ -414,6 +491,102 @@ function isAdmin() {
   const h = adminHash();
   return !!(h && acc && acc.email && hashEmail(acc.email) === h);
 }
+/** This week (Monday 00:00 → now, local time): its key (Monday's date) and hours played. */
+function weekInfo() {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const w0 = d.getTime();
+  let ms = 0;
+  for (const s of store.data.sessions) if (s.end > w0) ms += s.end - Math.max(s.start, w0);
+  for (const r of tracker.running.values()) ms += Date.now() - Math.max(r.start, w0);
+  return { week: new Date(w0 - new Date(w0).getTimezoneOffset() * 60000).toISOString().slice(0, 10), start: w0, hours: Math.min(168, Math.round(ms / 360000) / 10) };
+}
+
+/**
+ * Admin dashboard totals, built from the global snapshot. Only counts and game names
+ * go to the window: no player names, e-mails or socials.
+ */
+function adminStats(snap) {
+  const { users, presence, cards, friends, memberCount, now, offlineAfter } = snap;
+  const H = 3600000, D = 24 * H;
+  const uids = Object.keys(users);
+  const count = (list) => [...list.reduce((m, n) => m.set(n, (m.get(n) || 0) + 1), new Map())]
+    .sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, n]) => ({ name, n }));
+
+  // presence
+  let online = 0, away = 0, active24 = 0, active7 = 0, active30 = 0;
+  const playing = [];
+  for (const p of Object.values(presence)) {
+    if (!p || typeof p !== 'object') continue;
+    const age = now - (Number(p.lastSeen) || 0);
+    if (age < D) active24++;
+    if (age < 7 * D) active7++;
+    if (age < 30 * D) active30++;
+    if (age > offlineAfter || p.state === 'offline') continue;
+    if (p.state === 'away') away++; else online++;
+    if (p.game && p.game.name) playing.push(String(p.game.name).slice(0, 120));
+  }
+
+  // players
+  const ranks = challenges ? challenges.ranks() : RANKS;
+  const byRank = ranks.map((r) => ({ name: r.name, min: r.min, key: r.key, n: 0 }));
+  let levelSum = 0, levelMax = 0, new7 = 0, new30 = 0, founders = 0;
+  const titles = [];
+  for (const u of Object.values(users)) {
+    if (!u || typeof u !== 'object') continue;
+    const lv = Math.max(1, Number(u.level) || 1);
+    levelSum += lv; levelMax = Math.max(levelMax, lv);
+    let ri = 0; ranks.forEach((r, i) => { if (lv >= r.min) ri = i; });
+    if (byRank[ri]) byRank[ri].n++;
+    if (u.joinedAt && now - u.joinedAt < 7 * D) new7++;
+    if (u.joinedAt && now - u.joinedAt < 30 * D) new30++;
+    if (u.member && u.member <= 100) founders++;
+    if (u.title) titles.push(u.title);
+  }
+
+  // play time (cards)
+  const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const week = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  let totalHours = 0, weekHours = 0, gamesSum = 0, cardsN = 0, ultimate = 0, socials = 0;
+  const favorites = [];
+  for (const c of Object.values(cards)) {
+    if (!c || typeof c !== 'object') continue;
+    cardsN++;
+    totalHours += Number(c.totalHours) || 0;
+    if (c.week === week) weekHours += Number(c.weekHours) || 0;
+    gamesSum += Number(c.games) || 0;
+    if (c.ach && c.ach.ultimate) ultimate++;
+    if (c.socials && Object.keys(c.socials).length) socials++;
+    if (c.top && c.top.name) favorites.push(String(c.top.name).slice(0, 120));
+  }
+
+  // friendships (each one is stored on both sides)
+  let links = 0, lonely = 0;
+  for (const uid of uids) {
+    const n = Object.keys(friends[uid] || {}).length;
+    links += n;
+    if (!n) lonely++;
+  }
+
+  // local history of the online count, sampled at most every 5 min, kept 7 days
+  const hist = (store.data.adminHistory || []).filter((h) => now - h.at < 7 * D);
+  if (!hist.length || now - hist[hist.length - 1].at >= 5 * 60000) hist.push({ at: now, n: online + away });
+  store.data.adminHistory = hist; store.save();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const peakToday = Math.max(online + away, ...hist.filter((h) => h.at >= today.getTime()).map((h) => h.n));
+
+  return {
+    at: now,
+    online: { now: online + away, active: online, away, inGame: playing.length, peakToday, history: hist.filter((h) => now - h.at < D) },
+    activity: { active24, active7, active30 },
+    players: { members: Math.max(memberCount, uids.length), profiles: uids.length, new7, new30, founders, avgLevel: uids.length ? Math.round(levelSum / uids.length * 10) / 10 : 0, maxLevel: levelMax, byRank },
+    play: { totalHours: Math.round(totalHours), weekHours: Math.round(weekHours), avgGames: cardsN ? Math.round(gamesSum / cardsN) : 0, ultimate, socials, cards: cardsN },
+    friends: { pairs: Math.round(links / 2), avg: uids.length ? Math.round(links / uids.length * 10) / 10 : 0, lonely },
+    playingNow: count(playing),
+    favorites: count(favorites),
+    titles: count(titles),
+  };
+}
+
 function requireAdmin() { if (!isAdmin()) throw new Error('Réservé à l\'administrateur de Linkgeek'); }
 
 /** Accepts the firebaseConfig snippet copied from the Firebase console, or JSON. */
@@ -459,19 +632,18 @@ function getCard() {
     .map((g) => ({ name: g.name.slice(0, 120), source: g.source, ...(httpsArt(g) ? { cover: httpsArt(g) } : {}) }));
   const top = games.filter((g) => !g.hidden).sort((a, b) => b.playtimeSec - a.playtimeSec)[0];
   const a = achievements.list();
-  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  const w0 = d.getTime();
-  let week = 0;
-  for (const s of store.data.sessions) if (s.end > w0) week += s.end - Math.max(s.start, w0);
-  for (const r of tracker.running.values()) week += Date.now() - Math.max(r.start, w0);
+  const wk = weekInfo();
   const card = {
     top5,
     ach: { unlocked: a.unlocked, total: a.total, points: a.points, ...(a.ultimate ? { ultimate: true } : {}) },
     games: games.filter((g) => !g.hidden).length,
     totalHours: Math.round(games.reduce((s, g) => s + (g.playtimeSec || 0), 0) / 360) / 10,
-    weekHours: Math.min(168, Math.round(week / 360000) / 10),
-    week: new Date(w0 - new Date(w0).getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+    weekHours: wk.hours,
+    week: wk.week,
   };
+  const sc = showcaseFor(p, a).filter(Boolean)
+    .map((s) => ({ name: String(s.name).slice(0, 60), icon: String(s.icon || 'trophy').slice(0, 20), tier: s.tier, ...(s.kind === 'secret' || s.kind === 'ultimate' ? { kind: s.kind } : {}) }));
+  if (sc.length) card.showcase = sc;
   const soc = (store.data.profile && store.data.profile.socials) || {};
   if (Object.keys(soc).length) card.socials = { ...soc };
   const rec = getRecords();
@@ -534,6 +706,7 @@ function getSettings() {
     account: store.data.account,
     admin: { isAdmin: isAdmin(), online: !!(online && online.session) },
     notifyFriends: s.notifyFriends !== false,
+    weeklyBoard: s.weeklyBoard !== false,
     discord: { ...discordConfig(), connected: discord.ready },
     language: s.language === 'en' ? 'en' : 'fr',
     onboarded: !!s.onboarded,
@@ -599,11 +772,11 @@ function registerIpc() {
   });
 
   /* ---- Boutique ---- */
-  ipcMain.handle('shop:get', () => ({ ...shop.list(), titles: titles.list() }));
+  ipcMain.handle('shop:get', () => ({ ...shop.list(challenges.levelInfo().level), titles: titles.list() }));
   ipcMain.handle('titles:equip', (_e, key) => {
     titles.equip(key ? String(key) : null);
     if (online) online.updateIdentity();
-    return { shop: { ...shop.list(), titles: titles.list() }, profile: getProfile() };
+    return { shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, profile: getProfile() };
   });
   /* ---- Game news (Steam announcements) ---- */
   const steamGamesByPlaytime = () => library.games().filter((g) => g.source === 'steam' && !g.hidden).sort((a, b) => b.playtimeSec - a.playtimeSec);
@@ -639,15 +812,53 @@ function registerIpc() {
     send('library:changed');
     return { genres: genres.get(String(id)), detected: genres.detected(String(id)), custom: Array.isArray(genres.overrides[String(id)]) };
   });
+  ipcMain.handle('shop:spin', () => {
+    const prize = shop.spin();
+    // XP lands when the wheel stops (no level-up toast while it is still turning)
+    if (prize.kind === 'xp') setTimeout(payWheelXp, 5300);
+    return { prize, shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, profile: getProfile() };
+  });
   ipcMain.handle('shop:buy', (_e, id, apply) => {
-    const t = shop.buy(String(id));
+    const t = shop.buy(String(id), challenges.levelInfo().level);
     if (apply) { store.data.settings.theme = t.id; applyTheme(t.id); store.save(); }
-    return { shop: { ...shop.list(), titles: titles.list() }, settings: getSettings() };
+    return { shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, settings: getSettings() };
+  });
+
+  /** 5 showcased achievements: only unlocked ones, each at most once. */
+  ipcMain.handle('profile:setShowcase', (_e, keys) => {
+    const got = new Set(achievements.list().items.filter((it) => it.tier >= 1).map((it) => it.key));
+    const seen = new Set();
+    const showcase = Array.from({ length: 5 }, (_, i) => {
+      const k = Array.isArray(keys) && typeof keys[i] === 'string' ? keys[i] : null;
+      if (!k || !got.has(k) || seen.has(k)) return null;
+      seen.add(k); return k;
+    });
+    return setProfile({ showcase });
   });
 
   ipcMain.handle('profile:setTop5', (_e, ids) => {
     const top5 = Array.from({ length: 5 }, (_, i) => (Array.isArray(ids) && typeof ids[i] === 'string' ? ids[i] : null));
     return setProfile({ top5 });
+  });
+
+  /** The custom picture's bytes, so the window can shrink it on a canvas. */
+  ipcMain.handle('profile:avatarBytes', () => {
+    const p = store.data.profile || {};
+    if (!p.avatar || !fs.existsSync(p.avatar)) return null;
+    if (fs.statSync(p.avatar).size > 25 * 1024 * 1024) return null;
+    return { bytes: new Uint8Array(fs.readFileSync(p.avatar)), src: p.avatarV || 0 };
+  });
+  /** Small JPEG (128 px) of the custom picture, published online for friends. */
+  ipcMain.handle('profile:setAvatarShare', (_e, dataUrl, src) => {
+    const p = store.data.profile || {};
+    if (!p.avatar) return false;
+    const d = String(dataUrl || '');
+    if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(d) || d.length > 60000) throw new Error('Image invalide');
+    p.avatarShare = { v: crypto.createHash('sha1').update(d).digest('hex').slice(0, 16), src: Number(src) || 0, data: d };
+    store.data.profile = p;
+    store.save();
+    if (online) online.publishAvatar().catch(() => {});
+    return true;
   });
 
   ipcMain.handle('profile:pickAvatar', async () => {
@@ -678,6 +889,10 @@ function registerIpc() {
     if (patch && typeof patch.closeToTray === 'boolean') s.closeToTray = patch.closeToTray;
     if (patch && typeof patch.startup === 'boolean') setStartup(patch.startup);
     if (patch && typeof patch.notifyFriends === 'boolean') s.notifyFriends = patch.notifyFriends;
+    if (patch && typeof patch.weeklyBoard === 'boolean') {
+      s.weeklyBoard = patch.weeklyBoard;
+      if (online && online.session) { online.lastWeekly = ''; online.publishWeekly().catch(() => {}); }
+    }
     if (patch && (patch.language === 'fr' || patch.language === 'en')) s.language = patch.language;
     if (patch && typeof patch.onboarded === 'boolean') s.onboarded = patch.onboarded;
     if (patch && patch.discord && typeof patch.discord === 'object') {
@@ -774,7 +989,7 @@ function registerIpc() {
     }
     if (hasCoins) shop.add(Math.max(-1000000, Math.min(1000000, coins)), `${coins > 0 ? 'Jetons ajoutés' : 'Jetons retirés'} (admin)`);
     const ach = hasAch ? grantAchOrTitle(String(g.ach), g.tier) : null;
-    return { ...afterGrant(), shop: shop.list(), ach };
+    return { ...afterGrant(), shop: shop.list(challenges.levelInfo().level), ach };
   });
   ipcMain.handle('admin:achCatalog', () => {
     requireAdmin();
@@ -802,6 +1017,31 @@ function registerIpc() {
       coins: Number(g.coins), ach: g.ach || undefined, tier: g.ach ? Number(g.tier) : undefined,
     });
     return true;
+  });
+
+  /** Global leaderboard of the week (top 10 + my rank). null when offline. */
+  ipcMain.handle('board:weekly', async () => {
+    const wk = weekInfo();
+    const base = { week: wk.week, start: wk.start, myHours: wk.hours, enabled: store.data.settings.weeklyBoard !== false };
+    if (!online || !online.session) return { ...base, offline: true, rows: [] };
+    await online.publishWeekly().catch(() => {});
+    try {
+      const r = await online.weeklyTop(wk.week, base.enabled ? wk.hours : 0);
+      return { ...base, ...r };
+    } catch (e) {
+      return { ...base, rows: [], error: /refus|denied|401|403/i.test(String(e && e.message)) ? 'rules' : 'network' };
+    }
+  });
+
+  ipcMain.handle('admin:stats', async () => {
+    requireAdmin();
+    if (!online || !online.session) throw new Error('Connecte-toi au mode en ligne pour voir le tableau de bord');
+    let snap;
+    try { snap = await online.adminSnapshot(); } catch (e) {
+      if (/401|403|permission/i.test(String(e && e.message))) throw new Error('Le serveur refuse la lecture : republie les règles Firebase (Admin → Copier les règles)');
+      throw e;
+    }
+    return adminStats(snap);
   });
 
   ipcMain.handle('firebase:setConfig', async (_e, text) => {
@@ -891,7 +1131,7 @@ function registerIpc() {
   ipcMain.handle('profile:resetAvatar', () => {
     const old = store.data.profile && store.data.profile.avatar;
     if (old && fs.existsSync(old)) { try { fs.unlinkSync(old); } catch { /* ignore */ } }
-    return setProfile({ avatar: undefined });
+    return setProfile({ avatar: undefined, avatarShare: undefined }); // friends see the Google picture again
   });
 
   ipcMain.handle('game:launch', async (_e, id) => {
@@ -967,7 +1207,27 @@ function registerIpc() {
 
   ipcMain.handle('stats:get', async () => {
     const games = library.games();
-    return { sessions: store.data.sessions, disks: await diskInfo(games) };
+    return { sessions: store.data.sessions, disks: await diskInfo(games), records: getRecords() };
+  });
+  ipcMain.handle('stats:value', (_e, force) => libraryValue(!!force));
+  /** Linkgeek Wrapped: save the shareable picture (PNG drawn by the window). */
+  ipcMain.handle('stats:saveImage', async (_e, dataUrl, name) => {
+    const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+    if (!m) throw new Error('Image invalide');
+    const r = await dialog.showSaveDialog(win, {
+      title: 'Enregistrer mon récap Linkgeek',
+      defaultPath: path.join(app.getPath('pictures'), String(name || 'Linkgeek-recap').replace(/[^\w.-]+/g, '-') + '.png'),
+      filters: [{ name: 'Image PNG', extensions: ['png'] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    fs.writeFileSync(r.filePath, Buffer.from(m[1], 'base64'));
+    return r.filePath;
+  });
+  ipcMain.handle('stats:copyImage', (_e, dataUrl) => {
+    const img = nativeImage.createFromDataURL(String(dataUrl || ''));
+    if (img.isEmpty()) throw new Error('Image invalide');
+    clipboard.writeImage(img);
+    return true;
   });
 }
 
@@ -1036,6 +1296,18 @@ app.whenReady().then(async () => {
       return { name: p.name, photo: (acc && acc.picture) || null, level: p.level ? p.level.level : 1, admin: p.admin, frame: p.frame, title: p.title ? p.title.key : null };
     },
     getCard,
+    getAvatar: () => {
+      const p = store.data.profile || {};
+      return p.avatar && p.avatarShare && p.avatarShare.data ? { v: p.avatarShare.v, data: p.avatarShare.data } : null;
+    },
+    loadAvatarCache: () => store.data.friendAvatars || {},
+    saveAvatarCache: (c) => { store.data.friendAvatars = c; store.save(); },
+    getWeekly:() => ({ ...weekInfo(), enabled: store.data.settings.weeklyBoard !== false }),
+    onWeeklyPublished: (w) => {
+      const l = store.data.weeklyWeeks || (store.data.weeklyWeeks = []);
+      if (!l.includes(w)) { l.push(w); if (l.length > 60) l.shift(); store.save(); }
+    },
+    getWeeklyWeeks: () => store.data.weeklyWeeks || [],
     onMembership: (m) => {
       const cur = store.data.membership || {};
       if (cur.member === m.member && cur.joinedAt === m.joinedAt) return;
@@ -1105,6 +1377,7 @@ app.whenReady().then(async () => {
   titles = new Titles(store, titleContext, announceTitles);
   shop = new Shop(store);
   shop.init(challenges.levelInfo().level); // tokens for the levels reached before the Boutique existed
+  setTimeout(payWheelXp, 8000); // wheel XP not added because Linkgeek closed during the spin
   // a bought theme that is no longer owned (edited file): back to the default
   const th = store.data.settings.theme;
   if (th && !FREE_THEMES.includes(th) && !shop.owns(th)) store.data.settings.theme = 'classic';

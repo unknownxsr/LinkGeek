@@ -200,10 +200,11 @@ class Online {
   }
 
   /* ---------- Database ---------- */
-  async db(method, path, body) {
+  async db(method, path, body, query) {
     const c = this.requireConfig();
     const base = c.databaseURL.replace(/\/+$/, '');
-    const url = `${base}/${path}.json?auth=${encodeURIComponent(await this.token())}`;
+    const qs = query ? Object.entries(query).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('') : '';
+    const url = `${base}/${path}.json?auth=${encodeURIComponent(await this.token())}${qs}`;
     const r = await fetch(url, {
       method,
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
@@ -320,6 +321,8 @@ class Online {
     for (const f of (this.getSentRequests ? this.getSentRequests() : [])) if (!friends.includes(f)) paths.push(`requests/${f}/${me}`);
     for (const g of grants) paths.push(`grants/${me}/${g}`);
     if (code) paths.push(`codes/${code}`);
+    for (const w of (this.getWeeklyWeeks ? this.getWeeklyWeeks() : [])) paths.push(`weekly/${w}/${me}`);
+    paths.push(`avatars/${me}`);
     paths.push(`users/${me}`);
     let failed = 0;
     for (const p of paths) await this.db('DELETE', p).catch(() => { failed++; });
@@ -349,11 +352,12 @@ class Online {
     }
     const id = this.getIdentity();
     await this.db('PATCH', `users/${uid}`, { name: id.name || 'Joueur', photo: id.photo || null, code });
-    this.me = { ...me, name: id.name, code };
+    this.me = { ...me, name: id.name, code }; // keeps avatarV: the picture is re-sent only if it changed
     this.code = code;
     await this.ensureMembership(me).catch(() => {});
     await this.publishAdmin();
     await this.publishFrame().catch(() => {});
+    await this.publishAvatar().catch(() => {});
     await this.publishLevel();
     await this.publishCard(true);
   }
@@ -363,6 +367,7 @@ class Online {
     const id = this.getIdentity();
     await this.db('PATCH', `users/${this.session.uid}`, { name: id.name || 'Joueur', photo: id.photo || null }).catch(() => {});
     await this.publishFrame().catch(() => {});
+    await this.publishAvatar().catch(() => {});
     await this.publishLevel().catch(() => {});
     await this.publishCard().catch(() => {});
   }
@@ -414,6 +419,98 @@ class Online {
       await this.db('PUT', `cards/${this.session.uid}`, card);
       this.lastCard = key;
     } catch { /* rules from an older version: ignore */ }
+  }
+
+  /**
+   * Global weekly leaderboard: weekly/{monday}/{uid} = { name, photo, frame, title, level, hours, at },
+   * readable by every signed-in player. Skipped (and my entry removed) if I opted out.
+   */
+  async publishWeekly() {
+    if (!this.session || !this.getWeekly) return;
+    const w = this.getWeekly();
+    const path = `weekly/${w.week}/${this.session.uid}`;
+    if (!w.enabled) {
+      if (this.lastWeekly !== 'off:' + w.week) { await this.db('DELETE', path).catch(() => {}); this.lastWeekly = 'off:' + w.week; }
+      return;
+    }
+    const id = this.getIdentity();
+    const entry = { name: String(id.name || 'Joueur').slice(0, 40), hours: Math.max(0, Math.min(168, w.hours)), level: id.level || 1 };
+    if (id.photo && /^https:\/\//.test(id.photo)) entry.photo = id.photo;
+    if (id.frame) entry.frame = id.frame;
+    if (id.title) entry.title = id.title;
+    const key = JSON.stringify([path, entry]);
+    if (key === this.lastWeekly || entry.hours <= 0) return;
+    try {
+      await this.db('PUT', path, { ...entry, at: SV_TIME });
+      this.lastWeekly = key;
+      if (this.onWeeklyPublished) this.onWeeklyPublished(w.week);
+    } catch { /* rules not republished yet */ }
+  }
+
+  /** Top players of a week (hours played Monday → Sunday) and my own rank. */
+  async weeklyTop(week, myHours, n = 10) {
+    if (!this.session) return null;
+    const me = this.session.uid;
+    const top = (await this.db('GET', `weekly/${week}`, undefined, { orderBy: '"hours"', limitToLast: n })) || {};
+    const rows = Object.entries(top).filter(([, e]) => e && e.hours > 0)
+      .map(([uid, e]) => ({ me: uid === me, friend: (this.friendIds || []).includes(uid), uid: uid === me ? 'me' : uid, name: e.name, photo: ((this.friendIds || []).includes(uid) && this.avatarCache && this.avatarCache[uid] ? this.avatarCache[uid].data : e.photo) || null, frame: e.frame || null, title: e.title || null, level: e.level || 1, hours: e.hours }))
+      .sort((a, b) => b.hours - a.hours || String(a.name).localeCompare(String(b.name), 'fr'));
+    let myRank = rows.findIndex((r) => r.me) + 1 || null;
+    if (!myRank && myHours > 0) {
+      const above = (await this.db('GET', `weekly/${week}`, undefined, { orderBy: '"hours"', startAt: myHours }).catch(() => null)) || {};
+      myRank = Object.entries(above).filter(([uid, e]) => uid !== me && e && e.hours > myHours).length + 1;
+    }
+    return { rows, myRank };
+  }
+
+  /**
+   * Custom profile picture: a small JPEG in avatars/{uid}, and its version in
+   * users/{uid}/avatarV so friends download it only when it changes.
+   * No custom picture: both are removed and friends see the Google picture.
+   */
+  async publishAvatar() {
+    if (!this.session || !this.getAvatar) return;
+    const uid = this.session.uid;
+    const a = this.getAvatar();
+    const cur = (this.me && this.me.avatarV) || null;
+    if (a) {
+      if (cur === a.v) return;
+      await this.db('PUT', `avatars/${uid}`, { data: a.data });
+      await this.db('PATCH', `users/${uid}`, { avatarV: a.v });
+      this.me.avatarV = a.v;
+    } else if (cur) {
+      await this.db('PATCH', `users/${uid}`, { avatarV: null });
+      await this.db('DELETE', `avatars/${uid}`).catch(() => {});
+      this.me.avatarV = null;
+    }
+  }
+
+  /** A friend's custom picture (cached on this PC, refreshed when its version changes). */
+  friendPhoto(fid, u) {
+    const v = u && typeof u.avatarV === 'string' ? u.avatarV : null;
+    if (!v) return (u && u.photo) || null;
+    if (!this.avatarCache) this.avatarCache = (this.loadAvatarCache && this.loadAvatarCache()) || {};
+    const c = this.avatarCache[fid];
+    if (c && c.v === v) return c.data;
+    this.fetchAvatar(fid, v);
+    return (c && c.data) || (u && u.photo) || null; // old picture until the new one arrives
+  }
+
+  async fetchAvatar(fid, v) {
+    this.avatarLoading = this.avatarLoading || new Set();
+    if (this.avatarLoading.has(fid)) return;
+    this.avatarLoading.add(fid);
+    try {
+      const r = await this.db('GET', `avatars/${fid}`);
+      const data = r && typeof r.data === 'string' && /^data:image\/jpeg;base64,/.test(r.data) ? r.data : null;
+      if (data) {
+        this.avatarCache[fid] = { v, data };
+        // keep only current friends in the cache
+        for (const k of Object.keys(this.avatarCache)) if (!this.friendIds.includes(k)) delete this.avatarCache[k];
+        if (this.saveAvatarCache) this.saveAvatarCache(this.avatarCache);
+        this.rebuild();
+      }
+    } catch { /* rules not republished yet: Google picture meanwhile */ } finally { this.avatarLoading.delete(fid); }
   }
 
   /** Rank frame around my picture (separate write: older rules would refuse it). */
@@ -468,6 +565,19 @@ class Online {
     return true;
   }
 
+  /**
+   * Admin dashboard: raw global data (the server only allows this read to the admin).
+   * The caller turns it into totals; nothing per-player leaves the main process.
+   */
+  async adminSnapshot() {
+    if (!this.session) throw new Error('Connecte-toi au mode en ligne pour voir le tableau de bord');
+    const [users, presence, cards, friends, memberCount] = await Promise.all([
+      this.db('GET', 'users'), this.db('GET', 'presence'), this.db('GET', 'cards'), this.db('GET', 'friends'),
+      this.db('GET', 'meta/memberCount').catch(() => 0),
+    ]);
+    return { users: users || {}, presence: presence || {}, cards: cards || {}, friends: friends || {}, memberCount: Number(memberCount) || 0, now: this.now(), offlineAfter: OFFLINE_AFTER_MS };
+  }
+
   /** Pending XP gifts for me + the global rank table. Never breaks the friends poll. */
   async pollAdminData() {
     const uid = this.session.uid;
@@ -505,6 +615,7 @@ class Online {
     this.lastActivityKey = key;
     this.lastBeat = Date.now();
     if (changed) this.publishCard().catch(() => {});
+    this.publishWeekly().catch(() => {});
   }
 
   /* ---------- Live streams ---------- */
@@ -578,7 +689,7 @@ class Online {
       return {
         uid: fid,
         name: (u && u.name) || 'Joueur',
-        photo: (u && u.photo) || null,
+        photo: this.friendPhoto(fid, u),
         level: (u && Number(u.level)) || 1,
         admin: !!(u && u.admin),
         card: this.cards[fid] || null,

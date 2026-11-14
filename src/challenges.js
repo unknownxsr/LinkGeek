@@ -302,13 +302,14 @@ class Challenges {
     if (Number.isFinite(g.xp)) p.xp = Math.max(0, Math.floor(p.xp + g.xp));
     const delta = p.xp - beforeXp;
     const title = String(g.title || (Number.isFinite(g.level) ? `Niveau fixé à ${Math.floor(g.level)} par l'administrateur` : 'Cadeau de l\'administrateur')).slice(0, 120);
-    p.history.unshift({ title, xp: delta, at: Date.now(), kind: 'admin' });
+    const kind = g.kind === 'wheel' ? 'wheel' : 'admin'; // the shop never pays tokens for these XP
+    p.history.unshift({ title, xp: delta, at: Date.now(), kind });
     p.history = p.history.slice(0, 40);
     this.store.save();
     const info = this.levelInfo();
     const ranks = this.ranks();
     const levelUp = info.level > before ? { from: before, to: info.level, rank: info.rank, rankName: info.rankName, rankUp: rankFor(before, ranks).key !== info.rank } : null;
-    const result = { completed: [{ title, xp: delta, kind: 'admin' }], levelUp, level: info };
+    const result = { completed: [{ title, xp: delta, kind }], levelUp, level: info };
     this.onComplete(result);
     return info;
   }

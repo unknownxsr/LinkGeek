@@ -2,6 +2,7 @@
 const api = window.nexus;
 
 const state = {
+  cmpFriends: (() => { try { return localStorage.getItem('linkgeek-cmp-friends') === '1'; } catch { return false; } })(),
   games: [],
   profile: null,
   running: new Set(),
@@ -141,14 +142,71 @@ const $ = (s, el = document) => el.querySelector(s);
 const visibleGames = () => state.games.filter((g) => state.showHidden || !g.hidden);
 const byId = (id) => state.games.find((g) => g.id === id);
 
-function toast(msg, err = false) {
+/** keep = also store it in the notification centre (plain confirmations are not kept). */
+function toast(msg, err = false, keep = false) {
   const t = document.createElement('div');
-  t.className = 'toast' + (err ? ' err' : '');
+  t.className = 'toast' + (err ? ' err' : '') + (keep ? ' keep' : '');
   t.innerHTML = (err ? '⚠️ ' : '') + esc(msg);
   $('#toasts').appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 2800);
   setTimeout(() => t.remove(), 3200);
 }
+
+/* ---------------- Notification centre (bell next to the logo) ----------------
+ * Every important toast (challenges, levels, tokens, trophies, titles, friends,
+ * updates, wheel prizes) is copied here and kept on this PC (last 60). */
+const NOTIF_KEY = 'linkgeek-notifs';
+const NOTIF_NAV = [['f-toast', 'friends'], ['coin-toast', 'shop'], ['title-toast', 'shop'], ['lvup', 'challenges'], ['ch', 'challenges'], ['update', 'settings'], ['ach', 'achievements'], ['keep', 'shop']];
+const notifs = (() => { try { const l = JSON.parse(localStorage.getItem(NOTIF_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch { return []; } })();
+const saveNotifs = () => { try { localStorage.setItem(NOTIF_KEY, JSON.stringify(notifs.slice(0, 60))); } catch { /* ignore */ } };
+
+function recordToast(t) {
+  const cls = t.className;
+  if (!/\b(ach|coin-toast|f-toast|update|keep)\b/.test(cls) || /\berr\b/.test(cls)) return;
+  const copy = t.cloneNode(true);
+  copy.querySelectorAll('button, script').forEach((b) => b.remove()); // no dead buttons in the list
+  const nav = (NOTIF_NAV.find(([c]) => new RegExp(`\\b${c}\\b`).test(cls)) || [])[1] || null;
+  notifs.unshift({ at: Date.now(), cls: cls.replace(/\btoast\b/, '').trim(), html: copy.innerHTML, nav, read: false });
+  notifs.length = Math.min(notifs.length, 60);
+  saveNotifs();
+  renderNotifs();
+}
+
+function renderNotifs() {
+  const unread = notifs.filter((n) => !n.read).length;
+  const c = $('#notif-count');
+  if (c) { c.textContent = unread > 9 ? '9+' : unread || ''; c.classList.toggle('on', unread > 0); }
+  const p = $('#notif-panel');
+  if (!p || p.hidden) return;
+  p.innerHTML = `<div class="np-head"><b>Notifications</b>${notifs.length ? '<button class="link" data-notif-clear>Tout effacer</button>' : ''}</div>
+    <div class="np-list">${notifs.length ? notifs.map((n, i) => `<div class="np-item ${n.read ? '' : 'unread'} ${esc(n.cls)}" ${n.nav ? `data-notif-go="${i}"` : ''}>
+        <div class="np-body">${n.html}</div><small class="np-when">${esc(fmtAgo(n.at))}</small></div>`).join('')
+      : `<div class="np-empty"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><b>Aucune notification</b><span>Tes défis, niveaux, jetons, succès et l'activité de tes amis apparaîtront ici.</span></div>`}</div>`;
+}
+
+function toggleNotifs(open) {
+  const p = $('#notif-panel');
+  if (!p) return;
+  p.hidden = open === undefined ? !p.hidden : !open;
+  renderNotifs();
+  if (!p.hidden) {
+    // opening marks everything as read (the dots stay visible until next opening)
+    setTimeout(() => { notifs.forEach((n) => { n.read = true; }); saveNotifs(); const c = $('#notif-count'); if (c) { c.textContent = ''; c.classList.remove('on'); } }, 400);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#notif-bell')) { toggleNotifs(); return; }
+  const item = e.target.closest('[data-notif-go]');
+  if (item) { const n = notifs[Number(item.dataset.notifGo)]; toggleNotifs(false); if (n && n.nav) go(n.nav); return; }
+  if (e.target.closest('[data-notif-clear]')) { notifs.length = 0; saveNotifs(); renderNotifs(); return; }
+  const p = $('#notif-panel');
+  if (p && !p.hidden && !e.target.closest('.notif-wrap')) toggleNotifs(false);
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const p = $('#notif-panel'); if (p && !p.hidden) toggleNotifs(false); } });
+new MutationObserver((muts) => { for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('toast')) recordToast(n); })
+  .observe($('#toasts'), { childList: true });
+renderNotifs();
 
 function filteredGames() {
   const q = state.q.trim().toLowerCase();
@@ -168,15 +226,39 @@ function filteredGames() {
 }
 
 /* ---------------- Sidebar ---------------- */
+/**
+ * Friends see a custom profile picture through a small JPEG (128 px, square crop)
+ * made here on a canvas (works for PNG, JPG, WebP and GIF), then sent online by main.
+ */
+async function ensureAvatarShare() {
+  if (state.avatarSharing || !state.profile || !state.profile.needsAvatarShare) return;
+  state.avatarSharing = true;
+  try {
+    const r = await api.avatarBytes();
+    if (!r) return;
+    const bmp = await createImageBitmap(new Blob([r.bytes]));
+    const S = 128, side = Math.min(bmp.width, bmp.height);
+    const c = document.createElement('canvas'); c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1a1e29'; ctx.fillRect(0, 0, S, S); // transparent PNG: no black background
+    ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, S, S);
+    let q = 0.85, data = c.toDataURL('image/jpeg', q);
+    while (data.length > 58000 && q > 0.3) { q -= 0.15; data = c.toDataURL('image/jpeg', q); }
+    await api.setAvatarShare(data, r.src);
+    state.profile.needsAvatarShare = false;
+  } catch (e) { console.warn('avatar share', e); } finally { state.avatarSharing = false; }
+}
+
 function renderSidebar() {
   const p = state.profile;
+  if (p && p.needsAvatarShare) ensureAvatarShare();
   const name = p && p.name ? p.name : 'Joueur';
   const total = state.games.reduce((a, g) => a + g.playtimeSec, 0);
   const lv = p && p.level;
   $('#profile').innerHTML = `
     ${avatarHtml('avatar')}
     <div class="who"><div class="who-name"><b>${esc(name)}</b>${lv ? levelBadge(lv.level, 'sm') : ''}${p && p.admin ? adminTag() : ''}${p && p.ultimate ? ultimateBadge() : ''}</div>${p && p.title ? `<span class="who-title" title="Niveau ${lv ? lv.level : 1}${lv ? ` · ${esc(lv.rankName)}` : ''}">« ${esc(p.title.name)} »</span>` : `<span>${lv ? `Niveau ${lv.level} · ${esc(lv.rankName)}` : `${fmtHours(total)} de jeu au total`}</span>`}</div>
-    <span class="edit-hint">${I.edit}</span>`;
+    <span class="edit-hint" data-edit-profile title="Modifier le profil">${I.edit}</span>`;
   $('#profile').classList.toggle('active', state.view === 'profile');
 
   document.querySelectorAll('#nav button').forEach((b) => {
@@ -225,7 +307,7 @@ function gameCard(g) {
     </div>
     <div class="info">
       <div class="title" title="${esc(g.name)}">${esc(g.name)}</div>
-      <div class="meta"><span class="dot ${g.source}"></span>${esc(fmtTime(g.playtimeSec, 'Pas encore joué'))}${g.sizeBytes ? `<span class="sep"></span>${fmtSize(g.sizeBytes)}` : ''}</div>
+      <div class="meta"><span class="dot ${g.source}"></span>${esc(playLabel(g))}${g.sizeBytes ? `<span class="sep"></span>${fmtSize(g.sizeBytes)}` : ''}</div>
     </div>
   </div>`;
 }
@@ -256,31 +338,14 @@ function viewHome() {
   const games = visibleGames();
   if (!games.length) return state.loaded ? emptyLibrary() : loadingView();
   const recent = [...games].sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
-  const featured = games.find((g) => state.running.has(g.id)) || recent[0];
   const t = totals(games);
   const favs = games.filter((g) => g.favorite);
-  const running = state.running.has(featured.id);
-  const logo = featured.logo;
+  state.heroList = heroGames(games, recent);
+  if (!(state.heroIdx < state.heroList.length)) state.heroIdx = 0;
 
   return `
   <div class="page">
-    <section class="hero">
-      <div class="hero-bg" style="background-image:url('${esc(heroSrc(featured) || '')}')"></div>
-      <div class="hero-content">
-        <div class="eyebrow">${running ? '<span class="chip live">En cours</span>' : `<span class="dot ${featured.source}"></span>${featured.lastPlayed ? 'Reprendre la partie' : 'À découvrir'}`}</div>
-        ${logo ? `<img class="hero-logo" src="${esc(logo)}" alt="${esc(featured.name)}">` : `<h1>${esc(featured.name)}</h1>`}
-        <div class="hero-meta">
-          <span>${I.clock}${esc(fmtTime(featured.playtimeSec))}</span>
-          <span>${I.calendar}${esc(fmtAgo(featured.lastPlayed))}</span>
-          ${featured.sizeBytes ? `<span>${I.disk}${fmtSize(featured.sizeBytes)}</span>` : ''}
-        </div>
-        <div class="actions">
-          ${playButton(featured)}
-          <button class="btn-glass" data-open="${esc(featured.id)}">Détails</button>
-          <button class="btn-glass square ${featured.favorite ? 'on' : ''}" data-fav="${esc(featured.id)}" title="Favori">${I.star}</button>
-        </div>
-      </div>
-    </section>
+    <section class="hero">${heroInner(state.heroList[state.heroIdx], state.heroIdx, state.heroList.length)}</section>
 
     <button class="home-stats" data-nav="stats" title="Voir les statistiques">
       <div><b>${fmtHours(t.time)}</b><span>de jeu au total</span></div>
@@ -290,14 +355,11 @@ function viewHome() {
       <i>Statistiques →</i>
     </button>
 
-    <section class="section">
-      <div class="section-head"><div><h2>Reprendre</h2><div class="sub">Tes derniers jeux lancés</div></div><button class="link" data-nav="library">Toute la bibliothèque →</button></div>
-      <div class="rail">${recent.filter((g) => g.id !== featured.id).slice(0, 8).map(wideCard).join('')}</div>
-    </section>
+    ${weeklyBoardSection()}
 
     <div class="home-split">
       ${recentNewsSection()}
-      ${playerProfilePanel()}
+      ${infoPanel()}
     </div>
 
     ${recoSection()}
@@ -308,6 +370,198 @@ function viewHome() {
       <div class="grid">${favs.slice(0, 6).map(gameCard).join('')}</div>
     </section>` : ''}
   </div>`;
+}
+
+/* ---- Home: hero carousel (5 games, a new one every 5 s, in a loop) ---- */
+const HERO_COUNT = 5, HERO_MS = 5000;
+/** Running game first, then the most recently played ones (games with artwork preferred). */
+function heroGames(games, recent) {
+  const list = [];
+  const add = (g) => { if (g && !list.includes(g) && list.length < HERO_COUNT) list.push(g); };
+  games.filter((g) => state.running.has(g.id)).forEach(add);
+  recent.filter((g) => heroSrc(g)).forEach(add);
+  recent.forEach(add);
+  return list;
+}
+function heroInner(g, idx, n) {
+  const running = state.running.has(g.id);
+  if (!state.heroAt) state.heroAt = Date.now();
+  const elapsed = Math.min(HERO_MS, Math.max(0, Date.now() - state.heroAt)); // keeps the progress bar in step after a re-render
+  return `<div class="hero-bg" style="background-image:url('${esc(heroSrc(g) || '')}')"></div>
+    <div class="hero-content">
+      <div class="eyebrow">${running ? '<span class="chip live">En cours</span>' : `<span class="dot ${g.source}"></span>${g.lastPlayed ? (idx === 0 ? 'Reprendre la partie' : 'Joué récemment') : 'À découvrir'}`}</div>
+      ${g.logo ? `<img class="hero-logo" src="${esc(g.logo)}" alt="${esc(g.name)}">` : `<h1>${esc(g.name)}</h1>`}
+      <div class="hero-meta">
+        <span>${I.clock}${esc(fmtTime(g.playtimeSec))}</span>
+        <span>${I.calendar}${esc(fmtAgo(g.lastPlayed))}</span>
+        ${g.sizeBytes ? `<span>${I.disk}${fmtSize(g.sizeBytes)}</span>` : ''}
+      </div>
+      <div class="actions">
+        ${playButton(g)}
+        <button class="btn-glass" data-open="${esc(g.id)}">Détails</button>
+        <button class="btn-glass square ${g.favorite ? 'on' : ''}" data-fav="${esc(g.id)}" title="Favori">${I.star}</button>
+      </div>
+    </div>
+    ${n > 1 ? `<div class="hero-dots">${Array.from({ length: n }, (_, i) => `<button class="${i === idx ? 'on' : ''}" data-hero-dot="${i}" aria-label="Jeu ${i + 1}">${i === idx ? `<i style="animation-delay:-${elapsed}ms"></i>` : ''}</button>`).join('')}</div>` : ''}`;
+}
+/** Swaps only the hero (no full re-render), with a short fade. */
+function showHero(i) {
+  const el = $('.hero');
+  const list = state.heroList || [];
+  if (!el || state.view !== 'home' || list.length < 2) return;
+  state.heroIdx = (i + list.length) % list.length;
+  state.heroAt = Date.now();
+  el.classList.add('fading');
+  setTimeout(() => {
+    el.innerHTML = heroInner(list[state.heroIdx], state.heroIdx, list.length);
+    el.classList.remove('fading');
+  }, 280);
+}
+setInterval(() => {
+  const el = $('.hero');
+  if (!el || state.view !== 'home') return;
+  // paused while hovered / hidden / a dialog is open: push the deadline back
+  if (document.hidden || el.matches(':hover') || document.querySelector('#modal-root .modal')) { state.heroAt = (state.heroAt || Date.now()) + 500; return; }
+  if (Date.now() - (state.heroAt || 0) < HERO_MS - 100) return;
+  showHero((state.heroIdx || 0) + 1);
+}, 500);
+
+/* ---- Home: global leaderboard of the week (all players, Monday → Sunday) ---- */
+async function loadWeekly() {
+  if (state.weeklyLoading) return;
+  state.weeklyLoading = true;
+  try { state.weekly = await api.weeklyBoard(); state.weeklyAt = Date.now(); } catch { state.weekly = state.weekly || { rows: [], error: 'network' }; }
+  state.weeklyLoading = false;
+  if (state.view === 'home') render(true);
+}
+setInterval(() => { if (state.view === 'home' && !document.hidden) loadWeekly(); }, 120000);
+
+function weeklyBoardSection() {
+  const w = state.weekly;
+  if (!w && !state.weeklyLoading) loadWeekly();
+  const d0 = w ? new Date(w.start) : null;
+  const d1 = d0 ? new Date(w.start + 6 * 86400000) : null;
+  const dm = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  const sub = d0 ? `Du lundi ${dm(d0)} au dimanche ${dm(d1)} · remis à zéro chaque lundi` : 'Remis à zéro chaque lundi';
+  const hrs = (h) => `${String(Math.round(h * 10) / 10).replace('.', ',')} h`;
+  const medals = ['🥇', '🥈', '🥉'];
+  const avatar = (r) => {
+    const photo = r.me ? (state.profile && state.profile.avatar) || r.photo : r.photo;
+    return `<div class="f-avatar ${r.frame ? `framed r-${esc(r.frame)}` : ''}" style="--h:${hue(r.name || '?')}">${photo ? `<img src="${esc(photo)}" alt="" referrerpolicy="no-referrer">` : `<span>${esc(initials(r.name || '?'))}</span>`}</div>`;
+  };
+  const row = (r, rank, max) => `<div class="lb-row ${r.me ? 'me' : ''}" ${r.friend ? `data-friend-open="${esc(r.uid)}"` : ''}>
+      <span class="lb-rank">${rank <= 3 ? medals[rank - 1] : rank}</span>
+      ${avatar(r)}
+      <div class="lb-name"><b>${esc(r.name)}${r.me ? ' <small>(toi)</small>' : r.friend ? ' <small class="wb-friend">ami</small>' : ''}</b>${levelBadge(r.level || 1, 'xs')}${(() => { const n = r.me ? state.profile && state.profile.title && state.profile.title.name : r.title && titleName(r.title); return n ? titleChip(n) : ''; })()}</div>
+      <div class="lb-bar"><i style="width:${Math.max(3, Math.round((r.hours / max) * 100))}%"></i></div>
+      <b class="lb-val">${hrs(r.hours)}</b>
+    </div>`;
+  let body;
+  if (!w) body = '<div class="skeleton" style="height:220px"></div>';
+  else if (w.offline) body = `<div class="wb-empty">${I.trophy || ''}<div><b>Connecte-toi pour voir le classement</b><span>Le classement réunit tous les joueurs de Linkgeek. Connecte-toi avec Google pour y participer.</span></div><button class="ghost" data-goto-account>Se connecter</button></div>`;
+  else if (w.error === 'rules') body = '<p class="news-empty">Le classement n\'est pas encore activé sur le serveur.</p>';
+  else if (w.error) body = '<p class="news-empty">Impossible de charger le classement pour le moment.</p>';
+  else if (!w.rows.length) body = '<p class="news-empty">Personne n\'a encore joué cette semaine. Lance un jeu pour prendre la première place !</p>';
+  else {
+    const max = Math.max(1, ...w.rows.map((r) => r.hours));
+    body = w.rows.map((r, i) => row(r, i + 1, max)).join('');
+    if (w.enabled && !w.rows.some((r) => r.me)) {
+      body += w.myHours > 0 && w.myRank
+        ? `<div class="wb-sep">···</div>${row({ me: true, name: (state.profile && state.profile.name) || 'Moi', level: state.profile && state.profile.level ? state.profile.level.level : 1, frame: state.profile && state.profile.frame, hours: w.myHours }, w.myRank, max)}`
+        : '<p class="wb-note">Tu n\'as pas encore joué cette semaine : lance un jeu pour entrer dans le classement.</p>';
+    }
+  }
+  return `<section class="section">
+    <div class="section-head"><div><h2>Classement général de la semaine</h2><div class="sub">${esc(sub)}</div></div>${w && !w.offline ? '<button class="link" data-board-refresh>Actualiser</button>' : ''}</div>
+    <div class="panel lb wb">${body}</div>
+    ${w && !w.enabled ? '<p class="lb-note">Tu as choisi de ne pas apparaître dans le classement (Paramètres → Général).</p>' : ''}
+  </section>`;
+}
+
+/* ---- Home: "À savoir" info carousel (a new tip every 5 s, in a loop) ---- */
+const INFO_MS = 5000;
+const pctOf = (v, g) => Math.max(0, Math.min(100, g ? (v / g) * 100 : 0));
+function infoSlides() {
+  const out = [];
+  const s = state.shop;
+  // daily wheel
+  if (s && s.wheel) {
+    if (s.wheel.free) out.push({ icon: COIN, cls: 'gold', kicker: 'Roulette du jour', title: 'Ton tour gratuit t\'attend', text: 'Jetons, XP ou un thème au hasard : tente ta chance dans la Boutique.', nav: 'shop', cta: 'Tourner la roue' });
+    else {
+      const left = Math.max(0, s.wheel.nextAt - Date.now());
+      out.push({ icon: COIN, cls: 'gold', kicker: 'Roulette du jour', title: `Prochain tour dans ${Math.floor(left / 3600000)} h ${String(Math.floor(left / 60000) % 60).padStart(2, '0')} min`, text: 'Tu as déjà tourné la roue aujourd\'hui. Reviens après minuit !', nav: 'shop' });
+    }
+  }
+  // challenges
+  const c = state.chal;
+  if (c && c.daily) {
+    const todo = c.daily.items.filter((x) => !x.doneAt);
+    if (todo.length) {
+      const best = [...todo].sort((a, b) => pctOf(b.value, b.goal) - pctOf(a.value, a.goal))[0];
+      out.push({ icon: CH_ICONS[best.icon] || I.bolt, cls: 'violet', kicker: `${todo.length} défi${todo.length > 1 ? 's' : ''} du jour à terminer`, title: best.title, text: `${fmtGoal(best.value, best.unit)} / ${fmtGoal(best.goal, best.unit)} · +${best.xp} XP`, pct: pctOf(best.value, best.goal), nav: 'challenges' });
+    } else out.push({ icon: I.bolt, cls: 'green', kicker: 'Défis du jour', title: 'Tous terminés, bravo 🎉', text: 'De nouveaux défis arrivent demain à minuit.', nav: 'challenges' });
+    const wk = c.weekly && c.weekly.items.filter((x) => !x.doneAt).sort((a, b) => pctOf(b.value, b.goal) - pctOf(a.value, a.goal))[0];
+    if (wk) out.push({ icon: CH_ICONS[wk.icon] || I.calendar, cls: 'blue', kicker: 'Défi de la semaine', title: wk.title, text: `${fmtGoal(wk.value, wk.unit)} / ${fmtGoal(wk.goal, wk.unit)} · +${wk.xp} XP`, pct: pctOf(wk.value, wk.goal), nav: 'challenges' });
+  }
+  // closest achievement tier
+  const a = state.ach && state.ach.items && state.ach.items
+    .filter((it) => it.tier < 1 && !it.hidden && it.kind !== 'ultimate')
+    .map((it) => ({ it, next: it.tiers[0], p: pctOf(it.value, it.tiers[0].goal) }))
+    .filter((x) => x.p < 100).sort((x, y) => y.p - x.p)[0];
+  if (a) out.push({ icon: `<span class="info-trophy">${trophySvg(a.it.rarity, a.it.icon)}</span>`, cls: a.it.rarity, kicker: `Trophée ${a.next.name} · +${a.next.points} pts`, title: a.it.name, text: `${fmtAch(a.it.value, a.it.unit)} / ${fmtAch(a.next.goal, a.it.unit)} · encore ${fmtAch(Math.max(0, a.next.goal - a.it.value), a.it.unit)}`, pct: a.p, nav: 'achievements' });
+  // level
+  const lv = state.profile && state.profile.level;
+  if (lv) out.push({ icon: levelBadge(lv.level, 'sm'), cls: 'violet', kicker: `Niveau ${lv.level} · ${lv.rankName}`, title: `Encore ${(lv.needed - lv.into).toLocaleString('fr-FR')} XP pour le niveau ${lv.level + 1}`, text: lv.nextRank ? `Badge ${lv.nextRank.name} et son contour au niveau ${lv.nextRank.level}.` : 'Tu as atteint le rang le plus haut !', pct: pctOf(lv.into, lv.needed), nav: 'challenges' });
+  // closest profile title
+  const t = s && (s.titles || []).filter((x) => !x.unlockedAt && x.goal).sort((x, y) => pctOf(y.value, y.goal) - pctOf(x.value, x.goal))[0];
+  if (t) out.push({ icon: '🏷️', cls: 'gold', kicker: 'Titre à débloquer', title: `« ${t.name} »`, text: t.desc || '', meta: `${t.value} / ${t.goal}`, pct: pctOf(t.value, t.goal), nav: 'shop' });
+  // weekly leaderboard
+  const w = state.weekly;
+  if (w && !w.offline && w.enabled && w.myRank) out.push({ icon: I.trophy, cls: 'gold', kicker: 'Classement de la semaine', title: w.myRank === 1 ? 'Tu es 1er cette semaine 🥇' : `Tu es ${w.myRank}e cette semaine`, text: `${String(w.myHours).replace('.', ',')} h de jeu depuis lundi.` });
+  // friends
+  const fr = state.friends && state.friends.friends;
+  if (fr) {
+    const on = fr.filter((f) => friendState(f) !== 'offline').length;
+    const req = (state.friends.requests || []).length;
+    if (req) out.push({ icon: I.user || '👋', cls: 'green', kicker: 'Amis', title: `${req} demande${req > 1 ? 's' : ''} d'ami en attente`, text: 'Accepte-les depuis l\'onglet Amis.', nav: 'friends' });
+    else if (on) out.push({ icon: '👥', cls: 'green', kicker: 'Amis', title: `${on} ami${on > 1 ? 's' : ''} en ligne`, text: 'Va voir à quoi ils jouent.', nav: 'friends' });
+  }
+  return out;
+}
+function infoSlide(sl, idx, n) {
+  if (!sl) return '<p class="news-empty">Rien de neuf pour l\'instant.</p>';
+  return `<div class="info-slide ${sl.nav ? 'go' : ''}" ${sl.nav ? `data-nav="${sl.nav}"` : ''}>
+      <div class="info-ic ${esc(sl.cls || '')}">${sl.icon}</div>
+      <small class="info-k">${esc(sl.kicker)}</small>
+      <b class="info-t">${esc(sl.title)}</b>
+      <span class="info-x">${esc(sl.text)}</span>
+      ${sl.meta ? `<span class="info-m">${esc(sl.meta)}</span>` : ''}
+      ${sl.pct !== undefined ? `<div class="info-bar"><i style="width:${sl.pct.toFixed(1)}%"></i></div>` : ''}
+      ${sl.cta ? `<span class="info-cta"><span>${esc(sl.cta)}</span> →</span>` : ''}
+    </div>
+    ${n > 1 ? `<div class="info-nav">
+      <button class="info-arrow" data-info-step="-1" title="Info précédente" aria-label="Info précédente"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
+      <div class="info-dots">${Array.from({ length: n }, (_, i) => `<button class="${i === idx ? 'on' : ''}" data-info-dot="${i}" aria-label="Info ${i + 1}"></button>`).join('')}</div>
+      <span class="info-count">${idx + 1} / ${n}</span>
+      <button class="info-arrow" data-info-step="1" title="Info suivante" aria-label="Info suivante"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></button>
+    </div>` : ''}`;
+}
+function infoPanel() {
+  const slides = infoSlides();
+  if (!(state.infoIdx < slides.length)) state.infoIdx = 0;
+  return `<section class="section home-col">
+    <div class="section-head"><div><h2>À savoir</h2><div class="sub">Les infos du moment, mises à jour en direct</div></div></div>
+    <div class="panel info-card">${infoSlide(slides[state.infoIdx], state.infoIdx, slides.length)}</div>
+  </section>`;
+}
+function showInfo(i) {
+  const el = $('.info-card');
+  if (!el || state.view !== 'home') return;
+  const slides = infoSlides();
+  if (!slides.length) return;
+  state.infoIdx = (i + slides.length) % slides.length;
+  el.classList.add('fading');
+  setTimeout(() => { el.innerHTML = infoSlide(slides[state.infoIdx], state.infoIdx, slides.length); el.classList.remove('fading'); }, 180);
 }
 
 /* ---- Home: player profile & recommendations ---- */
@@ -377,6 +631,48 @@ function emptyLibrary() {
   return `<div class="page"><div class="empty" style="margin-top:80px"><b>Aucun jeu détecté</b>Linkgeek scanne Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app et GOG.<br>Tu peux aussi ajouter un jeu à la main.<br><br><button class="btn-play" data-add>${I.play}Ajouter un jeu</button></div></div>`;
 }
 
+/* ---- Library: grid or list view (remembered on this PC) ---- */
+const VIEW_ICONS = {
+  grid: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  list: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="4" height="4" rx="1"/><rect x="4" y="15" width="4" height="4" rx="1"/><path d="M11 7h9M11 17h9"/></svg>',
+};
+function libView() {
+  if (!state.libView) { try { state.libView = localStorage.getItem('linkgeek-libview') === 'list' ? 'list' : 'grid'; } catch { state.libView = 'grid'; } }
+  return state.libView;
+}
+function setLibView(v) {
+  state.libView = v === 'list' ? 'list' : 'grid';
+  try { localStorage.setItem('linkgeek-libview', state.libView); } catch { /* ignore */ }
+  render(true);
+}
+
+function libraryList(list) {
+  const head = (key, label, cls = '') => `<div class="ll-h ${cls} ${key ? 'sortable' : ''} ${state.sort === key ? 'on' : ''}" ${key ? `data-lib-sort="${key}"` : ''}>${label}${state.sort === key ? '<span class="arrow">↓</span>' : ''}</div>`;
+  return `<div class="lib-list">
+    <div class="ll-row ll-head">
+      ${head('name', 'Titre', 'll-title')}${head('', 'Plateforme')}${head('playtime', 'Temps de jeu', 'num')}${head('recent', 'Dernière partie', 'num')}${head('size', 'Taille', 'num')}<div></div>
+    </div>
+    ${list.map((g) => {
+      const running = state.running.has(g.id);
+      return `<div class="ll-row ll-game ${running ? 'running' : ''}" data-open="${esc(g.id)}" tabindex="0">
+        <div class="ll-title">
+          <div class="ll-cover">${coverHtml(g, 'thumb')}${g.newsNew && !running ? '<i class="ll-new" title="Une mise à jour ou une annonce est sortie depuis ta dernière partie"></i>' : ''}</div>
+          <div class="ll-name"><b title="${esc(g.name)}">${esc(g.name)}</b>
+            ${running ? '<span class="ll-run">● En cours</span>' : `<button class="ll-launch" data-launch="${esc(g.id)}">${I.play}Lancer</button>`}</div>
+        </div>
+        <div class="ll-src"><span class="dot ${g.source}"></span>${esc((SOURCES[g.source] || {}).label || g.source)}</div>
+        <div class="num">${g.playtimeSec ? esc(playLabel(g)) : `<span class="ll-dim">${OWN_PLAYTIME.has(g.source) ? '—' : 'Non suivi'}</span>`}</div>
+        <div class="num">${running ? '<span class="ll-run">Maintenant</span>' : g.lastPlayed ? esc(fmtAgo(g.lastPlayed)) : '<span class="ll-dim">Jamais</span>'}</div>
+        <div class="num">${g.sizeBytes ? fmtSize(g.sizeBytes) : '<span class="ll-dim">—</span>'}</div>
+        <div class="ll-actions">
+          <button class="ll-ico ${g.favorite ? 'on' : ''}" data-fav="${esc(g.id)}" title="Favori">${I.star}</button>
+          <button class="ll-ico" data-open="${esc(g.id)}" title="Détails">⋯</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function viewLibrary() {
   const all = visibleGames();
   const list = filteredGames();
@@ -395,6 +691,10 @@ function viewLibrary() {
       </div>
       <div class="spacer"></div>
       ${state.q ? `<span class="result-count">« ${esc(state.q)} » · ${list.length} résultat${list.length > 1 ? 's' : ''}</span>` : ''}
+      <div class="segmented sm view-switch" role="group" aria-label="Affichage">
+        <button class="${libView() === 'grid' ? 'active' : ''}" data-lib-view="grid" title="Affichage en grille">${VIEW_ICONS.grid}</button>
+        <button class="${libView() === 'list' ? 'active' : ''}" data-lib-view="list" title="Affichage en liste">${VIEW_ICONS.list}</button>
+      </div>
       <button class="toggle ${state.showHidden ? 'on' : ''}" data-toggle-hidden>${state.showHidden ? I.eye : I.eyeOff}Masqués</button>
       <select class="select" id="sort">
         <option value="recent" ${state.sort === 'recent' ? 'selected' : ''}>Utilisation la plus récente</option>
@@ -415,7 +715,7 @@ function viewLibrary() {
         <button class="link" data-col-rename="${esc(state.collection)}">Renommer</button>
         <button class="link danger" data-col-del="${esc(state.collection)}">Supprimer la collection</button>` : ''}
     </div>
-    ${list.length ? `<div class="grid">${list.map(gameCard).join('')}</div>` : state.collection ? `<div class="empty"><b>Collection vide</b>Ouvre un jeu puis utilise « Collections » pour l'y ranger.</div>` : `<div class="empty"><b>Aucun jeu trouvé</b>Essaie un autre filtre ou une autre recherche.</div>`}
+    ${list.length ? (libView() === 'list' ? libraryList(list) : `<div class="grid">${list.map(gameCard).join('')}</div>`) : state.collection ? `<div class="empty"><b>Collection vide</b>Ouvre un jeu puis utilise « Collections » pour l'y ranger.</div>` : `<div class="empty"><b>Aucun jeu trouvé</b>Essaie un autre filtre ou une autre recherche.</div>`}
   </div>`;
 }
 
@@ -596,6 +896,287 @@ function activityChart(sessions, days) {
     </div>`).join('')}</div>`;
 }
 
+/* ---------------- Statistics helpers ----------------
+ * Only Steam reports its own playtime. For every other platform Linkgeek only
+ * knows the sessions it tracked itself, so "0 h" is shown as "non suivi". */
+const OWN_PLAYTIME = new Set(['steam']);
+function playLabel(g, empty = 'Pas encore joué') {
+  if (OWN_PLAYTIME.has(g.source)) return fmtTime(g.playtimeSec, empty);
+  return g.playtimeSec ? `${fmtTime(g.playtimeSec)} suivies` : 'Non suivi';
+}
+const DAYS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+const mondayOf = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); };
+/** ms played between a and b (sessions cut at the edges, running games included). */
+function playedBetween(sessions, a, b) {
+  let ms = 0;
+  for (const s of sessions) { const x = Math.max(s.start, a); const y = Math.min(s.end, b); if (y > x) ms += y - x; }
+  return ms;
+}
+function allSessions() {
+  const now = Date.now();
+  const list = [...((state.stats && state.stats.sessions) || [])];
+  for (const id of state.running) list.push({ gameId: id, start: state.runningSince && state.runningSince[id] ? state.runningSince[id] : now, end: now });
+  return list;
+}
+/** Minutes per weekday (Mon=0) x hour, over the last `weeks` weeks. */
+function heatGrid(sessions, weeks = 12) {
+  const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  const from = Date.now() - weeks * 7 * 86400000;
+  for (const s of sessions) {
+    let t = Math.max(s.start, from);
+    while (t < s.end) {
+      const d = new Date(t);
+      const next = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime();
+      const part = Math.min(next, s.end) - t;
+      grid[(d.getDay() + 6) % 7][d.getHours()] += part / 60000;
+      t = next;
+    }
+  }
+  return grid;
+}
+function heatmapPanel(sessions) {
+  const g = heatGrid(sessions);
+  const max = Math.max(...g.flat());
+  if (max < 1) return '<div class="empty">Joue un peu avec Linkgeek ouvert : la grille se remplira avec tes horaires de jeu.</div>';
+  const hours = new Array(24).fill(0).map((_, h) => g.reduce((a, row) => a + row[h], 0));
+  const days = g.map((row) => row.reduce((a, v) => a + v, 0));
+  const favH = hours.indexOf(Math.max(...hours));
+  const favD = days.indexOf(Math.max(...days));
+  const m = (v) => (v >= 60 ? `${Math.floor(v / 60)} h ${String(Math.round(v % 60)).padStart(2, '0')}` : `${Math.round(v)} min`);
+  return `<div class="heat">
+      <div class="heat-hours"><span></span>${hours.map((_, h) => `<span>${h % 3 === 0 ? `${h} h` : ''}</span>`).join('')}</div>
+      ${g.map((row, d) => `<div class="heat-row"><span class="heat-day">${DAYS_FR[d].slice(0, 3)}.</span>${row.map((v, h) => `<i style="--v:${(v / max).toFixed(3)}" title="${DAYS_FR[d]} ${h} h : ${v ? m(v) : 'rien'} (12 dernières semaines)"></i>`).join('')}</div>`).join('')}
+    </div>
+    <div class="heat-facts">
+      <div><span>Heure préférée</span><b>${favH} h – ${(favH + 1) % 24} h</b></div>
+      <div><span>Jour le plus actif</span><b class="cap">${DAYS_FR[favD]}</b></div>
+      <div class="heat-scale"><span>Moins</span>${[0.08, 0.3, 0.55, 0.8, 1].map((v) => `<i style="--v:${v}"></i>`).join('')}<span>Plus</span></div>
+    </div>`;
+}
+function cmpCard(label, now, before, hint) {
+  const h = (ms) => (ms ? fmtTime(ms / 1000) : '0 h');
+  let delta = '';
+  if (before > 60000) {
+    const pct = Math.round(((now - before) / before) * 100);
+    delta = `<span class="cmp-d ${pct > 0 ? 'up' : pct < 0 ? 'down' : ''}">${pct > 0 ? '↑' : pct < 0 ? '↓' : '='} ${Math.abs(pct)} %</span>`;
+  } else if (now > 60000) delta = '<span class="cmp-d up">nouveau</span>';
+  return `<div class="cmp"><span class="cmp-l">${esc(label)}</span><div class="cmp-v"><b>${h(now)}</b>${delta}</div><small><span>${esc(hint)}</span> : <span>${h(before)}</span></small></div>`;
+}
+function comparisonsPanel(sessions) {
+  const now = Date.now();
+  const w0 = mondayOf(now);
+  const m0 = new Date(now); m0.setHours(0, 0, 0, 0); m0.setDate(1);
+  const pm0 = new Date(m0); pm0.setMonth(pm0.getMonth() - 1);
+  const pmEnd = Math.min(m0.getTime(), pm0.getTime() + (now - m0.getTime()));
+  const week = playedBetween(sessions, w0, now);
+  const month = playedBetween(sessions, m0.getTime(), now);
+  let friends = '';
+  if (state.cmpFriends) {
+    const wk = currentWeekKey();
+    const list = ((state.friends && state.friends.friends) || []).filter((f) => f.card && f.card.week === wk);
+    if (!list.length) friends = '<div class="cmp-friends"><span>Pas encore de données de tes amis pour cette semaine.</span></div>';
+    else {
+      const avg = list.reduce((a, f) => a + (Number(f.card.weekHours) || 0), 0) / list.length;
+      const mine = week / 3600000;
+      const pct = avg > 0 ? Math.round(((mine - avg) / avg) * 100) : null;
+      const txt = pct === null ? `Tes amis n'ont pas encore joué cette semaine, toi ${fmtTime(week / 1000) || '0 h'}.`
+        : pct === 0 ? 'Tu as joué autant que la moyenne de tes amis cette semaine.'
+          : `Tu as joué ${Math.abs(pct)} % de ${pct > 0 ? 'plus' : 'moins'} que la moyenne de tes amis cette semaine.`;
+      friends = `<div class="cmp-friends ${pct > 0 ? 'up' : pct < 0 ? 'down' : ''}"><b>${esc(txt)}</b><span>Moyenne de ${list.length} ami${list.length > 1 ? 's' : ''} : ${String(Math.round(avg * 10) / 10).replace('.', ',')} h · toi : ${String(Math.round(mine * 10) / 10).replace('.', ',')} h</span></div>`;
+    }
+  }
+  return `<div class="cmps">
+      ${cmpCard('Cette semaine', week, playedBetween(sessions, w0 - 7 * 86400000, now - 7 * 86400000), 'Même moment la semaine dernière')}
+      ${cmpCard('Ce mois-ci', month, playedBetween(sessions, pm0.getTime(), pmEnd), `Même moment en ${MONTHS_FR[pm0.getMonth()]}`)}
+    </div>
+    <label class="cmp-toggle"><button class="switch ${state.cmpFriends ? 'on' : ''}" data-cmp-friends role="switch" aria-checked="${!!state.cmpFriends}"><i></i></button>Comparer avec mes amis</label>
+    ${friends}`;
+}
+const fmtEur = (v) => v.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: v < 1 ? 2 : v < 100 ? 2 : 0, maximumFractionDigits: 2 });
+function valuePanel() {
+  const v = state.libValue;
+  if (!v) { if (!state.libValueLoading) loadLibValue(); return '<div class="skeleton" style="height:160px"></div>'; }
+  if (!v.count) return '<div class="empty">Aucun prix Steam trouvé pour tes jeux (hors ligne ?).</div>';
+  const best = v.items.filter((x) => x.perHour !== null).sort((a, b) => a.perHour - b.perHour);
+  const top = best[0] && byId(best[0].gameId);
+  const perH = (x) => (x < 0.01 ? '< 0,01 €' : fmtEur(x));
+  return `<div class="val-kpis">
+      <div><span>Valeur estimée</span><b>${fmtEur(v.total)}</b><small>${v.count} jeux Steam${v.free ? ` dont ${v.free} gratuit${v.free > 1 ? 's' : ''}` : ''}</small></div>
+      <div><span>Coût moyen par heure</span><b>${v.perHour !== null ? perH(v.perHour) : '—'}</b><small>sur tes jeux payants</small></div>
+    </div>
+    ${top ? `<p class="val-fun"><span>${esc(top.name)} t'a coûté</span> <b>${perH(best[0].perHour)}</b> <span>de l'heure 😄</span></p>` : ''}
+    ${best.length ? `<div class="val-list"><small>Meilleur rapport heures / prix</small>${best.slice(0, 5).map((x) => { const g = byId(x.gameId); return g ? `<div class="val-row" data-open="${esc(g.id)}">${coverHtml(g, 'thumb')}<span title="${esc(g.name)}">${esc(g.name)}</span><em>${fmtEur(x.price)} · ${Math.round(x.hours)} h</em><b>${perH(x.perHour)}/h</b></div>` : ''; }).join('')}</div>` : ''}
+    <p class="val-note">Prix Steam actuels en France, hors promotions. Les jeux des autres plateformes ne sont pas comptés.</p>`;
+}
+async function loadLibValue(force = false) {
+  state.libValueLoading = true;
+  try { state.libValue = await api.getLibraryValue(force); } catch { state.libValue = { count: 0, items: [] }; }
+  state.libValueLoading = false;
+  if (state.view === 'stats') render(true);
+}
+function statsRecords(r) {
+  if (!r) return '';
+  const card = (icon, label, value, sub) => `<div class="srec"><div class="srec-ic">${icon}</div><span>${esc(label)}</span><b title="${esc(value)}">${esc(value)}</b><small title="${esc(sub)}">${esc(sub)}</small></div>`;
+  const lg = r.longest && byId(r.longest.gameId);
+  const nw = r.newest && byId(r.newest.gameId);
+  const dt = (t) => new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `<div class="srecs">
+      ${card(I.bolt, 'Session la plus longue', r.longest ? fmtDur(r.longest.ms) : '—', r.longest ? `${lg ? lg.name : 'Jeu supprimé'} · ${dt(r.longest.at)}` : 'Pas encore de session suivie')}
+      ${card(I.calendar, 'Plus longue série', `${r.streak.best} jour${r.streak.best > 1 ? 's' : ''}`, r.streak.current ? `Série en cours : ${r.streak.current} jour${r.streak.current > 1 ? 's' : ''}` : 'Aucune série en cours')}
+      ${card(I.clock, 'Jour le plus joué', r.bestDay ? fmtDur(r.bestDay.ms) : '—', r.bestDay ? dt(r.bestDay.at) : 'Pas encore de session suivie')}
+      ${card(I.star, 'Dernier jeu découvert', nw ? nw.name : '—', nw ? `Ajouté le ${dt(r.newest.at)}` : 'Aucun nouveau jeu depuis l\'installation')}
+    </div>`;
+}
+
+/* ---------------- Linkgeek Wrapped ----------------
+ * Animated recap of a month (or of the year in December / January), from the
+ * sessions Linkgeek tracked, ending with a picture to save or copy. */
+function wrappedPeriods() {
+  const now = new Date();
+  const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const mName = MONTHS_FR[pm.getMonth()];
+  const list = [{ key: 'month', label: `Récap ${/^[aeiouy]/.test(mName) ? 'd\'' : 'de '}${mName} ${pm.getFullYear()}`, title: `${MONTHS_FR[pm.getMonth()]} ${pm.getFullYear()}`, from: pm.getTime(), to: new Date(now.getFullYear(), now.getMonth(), 1).getTime() }];
+  const y = now.getMonth() === 11 ? now.getFullYear() : now.getMonth() === 0 ? now.getFullYear() - 1 : null;
+  if (y) list.unshift({ key: 'year', label: `Mon année ${y}`, title: `ton année ${y}`, from: new Date(y, 0, 1).getTime(), to: Math.min(Date.now(), new Date(y + 1, 0, 1).getTime()), year: true });
+  return list;
+}
+function wrappedButtons() {
+  return wrappedPeriods().map((p, i) => `<button class="${p.year ? 'btn-play' : 'btn-glass'} wrap-btn" data-wrapped="${i}"><span aria-hidden="true">🎁</span><span>${esc(p.label)}</span></button>`).join('');
+}
+function recapData(p) {
+  const ss = allSessions().filter((s) => s.end > p.from && s.start < p.to).map((s) => ({ ...s, start: Math.max(s.start, p.from), end: Math.min(s.end, p.to) }));
+  const per = {};
+  const days = new Map();
+  let longest = null;
+  for (const s of ss) {
+    per[s.gameId] = (per[s.gameId] || 0) + s.end - s.start;
+    if (!longest || s.end - s.start > longest.ms) longest = { ms: s.end - s.start, gameId: s.gameId };
+    for (let t = new Date(s.start).setHours(0, 0, 0, 0); t < s.end; t = new Date(t + 36 * 3600000).setHours(0, 0, 0, 0)) {
+      const part = Math.min(s.end, new Date(t + 36 * 3600000).setHours(0, 0, 0, 0)) - Math.max(s.start, t);
+      if (part > 0) days.set(t, (days.get(t) || 0) + part);
+    }
+  }
+  const total = Object.values(per).reduce((a, v) => a + v, 0);
+  const top = Object.entries(per).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, ms]) => ({ game: byId(id), name: (byId(id) || {}).name || 'Jeu supprimé', ms }));
+  const bestDay = [...days].sort((a, b) => b[1] - a[1])[0];
+  const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  for (const s of ss) for (let t = s.start; t < s.end;) { const d = new Date(t); const nx = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime(); grid[(d.getDay() + 6) % 7][d.getHours()] += Math.min(nx, s.end) - t; t = nx; }
+  const hours = new Array(24).fill(0).map((_, h) => grid.reduce((a, r) => a + r[h], 0));
+  const dsum = grid.map((r) => r.reduce((a, v) => a + v, 0));
+  const fam = state.reco && state.reco.profile && state.reco.profile.families && state.reco.profile.families[0];
+  return {
+    total, sessions: ss.length, games: Object.keys(per).length, days: days.size, top, longest,
+    bestDay: bestDay ? { at: bestDay[0], ms: bestDay[1] } : null,
+    favHour: total ? hours.indexOf(Math.max(...hours)) : null, favDay: total ? dsum.indexOf(Math.max(...dsum)) : null,
+    genre: fam ? fam.name : null,
+  };
+}
+function wrappedSlides(p, d) {
+  const h = (ms) => Math.round(ms / 3600000).toLocaleString('fr-FR');
+  const name = (state.profile && state.profile.name) || 'Joueur';
+  if (d.total < 60000) return [{ cls: 's1', html: `<small>Linkgeek Wrapped</small><h1>Pas encore assez de parties</h1><p>Linkgeek n'a suivi aucune session sur ${esc(p.title)}. Laisse-le ouvert quand tu joues et reviens le mois prochain !</p>` }];
+  const g1 = d.top[0];
+  const out = [
+    { cls: 's1', html: `<small>Linkgeek Wrapped</small><h1>${esc(name)}, voici ${esc(p.title)} 🎮</h1><p>Prêt à revoir tes parties ?</p>` },
+    { cls: 's2', html: `<small>Ton temps de jeu</small><div class="w-big">${h(d.total)}<span>h</span></div><p>en <b>${d.sessions}</b> session${d.sessions > 1 ? 's' : ''}, sur <b>${d.days}</b> jour${d.days > 1 ? 's' : ''}, avec <b>${d.games}</b> jeu${d.games > 1 ? 'x' : ''} différent${d.games > 1 ? 's' : ''}</p>` },
+  ];
+  if (g1) out.push({ cls: 's3', bg: g1.game ? heroSrc(g1.game) : null, html: `<small>Ton jeu n°1</small><h1>${esc(g1.name)}</h1><div class="w-big sm">${h(g1.ms)}<span>h</span></div><p>soit ${Math.round((g1.ms / d.total) * 100)} % de ton temps de jeu</p>` });
+  if (d.top.length > 1) out.push({ cls: 's4', html: `<small>Ton top ${d.top.length}</small><ol class="w-top">${d.top.map((x, i) => `<li style="--i:${i}"><span>${i + 1}</span>${x.game ? coverHtml(x.game, 'thumb') : ''}<b>${esc(x.name)}</b><em>${h(x.ms)} h</em></li>`).join('')}</ol>` });
+  if (d.genre) out.push({ cls: 's5', html: `<small>Ton genre préféré</small><h1 class="w-grad">${esc(d.genre)}</h1><p>D'après tout ton temps de jeu</p>` });
+  out.push({ cls: 's6', html: `<small>Tes records</small><div class="w-recs">
+      ${d.longest ? `<div><span>Session la plus longue</span><b>${esc(fmtDur(d.longest.ms))}</b><em>${esc((byId(d.longest.gameId) || {}).name || '')}</em></div>` : ''}
+      ${d.bestDay ? `<div><span>Ta plus grosse journée</span><b>${esc(fmtDur(d.bestDay.ms))}</b><em>le ${new Date(d.bestDay.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</em></div>` : ''}
+    </div>` });
+  if (d.favHour !== null) out.push({ cls: 's7', html: `<small>Tes habitudes</small><h1>Tu joues surtout le <span class="w-grad">${DAYS_FR[d.favDay]}</span>, vers <span class="w-grad">${d.favHour} h</span></h1>` });
+  out.push({ cls: 's8', share: true, html: `<small>À partager</small><h1>Ton récap en image</h1><canvas class="w-canvas" width="1080" height="1350"></canvas>
+    <div class="w-actions"><button class="btn-play" data-w="save">Enregistrer l'image</button><button class="btn-glass" data-w="copy">Copier</button></div>` });
+  return out;
+}
+function drawShare(cv, p, d) {
+  const x = cv.getContext('2d');
+  const W = 1080, H = 1350;
+  const bg = x.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#120a2a'); bg.addColorStop(0.55, '#1b0f3d'); bg.addColorStop(1, '#062a3a');
+  x.fillStyle = bg; x.fillRect(0, 0, W, H);
+  const glow = (cx, cy, r, c) => { const g = x.createRadialGradient(cx, cy, 0, cx, cy, r); g.addColorStop(0, c); g.addColorStop(1, 'transparent'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
+  glow(900, 120, 520, 'rgba(124,92,255,.45)'); glow(120, 1250, 520, 'rgba(34,211,238,.32)');
+  const grad = x.createLinearGradient(80, 0, 1000, 0); grad.addColorStop(0, '#a78bfa'); grad.addColorStop(1, '#22d3ee');
+  x.textBaseline = 'alphabetic';
+  x.fillStyle = 'rgba(255,255,255,.7)'; x.font = '700 34px "Segoe UI", sans-serif';
+  x.fillText('LINKGEEK WRAPPED', 80, 120);
+  x.fillStyle = '#fff'; x.font = '800 64px "Segoe UI", sans-serif';
+  x.fillText(p.title.charAt(0).toUpperCase() + p.title.slice(1), 80, 200);
+  x.fillStyle = grad; x.font = '900 220px "Segoe UI", sans-serif';
+  const hrs = String(Math.round(d.total / 3600000));
+  x.fillText(hrs, 70, 440);
+  const w = x.measureText(hrs).width;
+  x.fillStyle = '#fff'; x.font = '700 60px "Segoe UI", sans-serif'; x.fillText('heures de jeu', 90 + w, 430);
+  x.fillStyle = 'rgba(255,255,255,.75)'; x.font = '500 36px "Segoe UI", sans-serif';
+  x.fillText(`${d.sessions} sessions · ${d.days} jours · ${d.games} jeux`, 80, 500);
+  x.fillStyle = '#fff'; x.font = '800 44px "Segoe UI", sans-serif'; x.fillText('Mon top 5', 80, 610);
+  d.top.forEach((t, i) => {
+    const y = 680 + i * 78;
+    x.fillStyle = 'rgba(255,255,255,.08)'; x.beginPath(); x.roundRect(80, y - 50, 920, 66, 18); x.fill();
+    x.fillStyle = grad; x.font = '900 40px "Segoe UI", sans-serif'; x.fillText(String(i + 1), 108, y);
+    x.fillStyle = '#fff'; x.font = '600 36px "Segoe UI", sans-serif';
+    let n = t.name; while (x.measureText(n).width > 640 && n.length > 3) n = n.slice(0, -2);
+    x.fillText(n === t.name ? n : n + '…', 170, y);
+    x.fillStyle = 'rgba(255,255,255,.7)'; x.textAlign = 'right'; x.fillText(`${Math.round(t.ms / 3600000)} h`, 975, y); x.textAlign = 'left';
+  });
+  const facts = [d.genre && ['Genre préféré', d.genre], d.longest && ['Session record', fmtDur(d.longest.ms)], d.favHour !== null && ['Moment préféré', `${DAYS_FR[d.favDay]}, ${d.favHour} h`]].filter(Boolean);
+  facts.forEach(([k, v], i) => {
+    const y = 1130 + Math.floor(i / 2) * 0; const xx = 80 + i * 320;
+    x.fillStyle = 'rgba(255,255,255,.6)'; x.font = '600 26px "Segoe UI", sans-serif'; x.fillText(k.toUpperCase(), xx, y);
+    x.fillStyle = '#fff'; x.font = '800 34px "Segoe UI", sans-serif';
+    let s = String(v); const full = s;
+    while (x.measureText(s + '…').width > 290 && s.length > 3) s = s.slice(0, -1);
+    x.fillText(s === full ? s : s.trim() + '…', xx, y + 48);
+  });
+  x.fillStyle = 'rgba(255,255,255,.55)'; x.font = '600 28px "Segoe UI", sans-serif';
+  x.fillText(`${(state.profile && state.profile.name) || 'Joueur'} sur Linkgeek`, 80, 1290);
+}
+function openWrapped(i) {
+  const p = wrappedPeriods()[i];
+  if (!p) return;
+  const d = recapData(p);
+  const slides = wrappedSlides(p, d);
+  const root = $('#modal-root');
+  let idx = 0; let timer = null;
+  const show = (n) => {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    const s = slides[idx];
+    root.querySelector('.w-stage').innerHTML = `<div class="w-slide ${s.cls}">${s.bg ? `<div class="w-bg" style="background-image:url('${esc(s.bg)}')"></div>` : ''}<div class="w-in">${s.html}</div></div>`;
+    root.querySelectorAll('.w-prog i').forEach((b, k) => { b.className = k < idx ? 'done' : k === idx ? (s.share ? 'done' : 'on') : ''; });
+    root.querySelector('.wrapped').classList.toggle('share', !!s.share);
+    clearTimeout(timer);
+    if (s.share) { const cv = root.querySelector('.w-canvas'); drawShare(cv, p, d); } else timer = setTimeout(() => show(idx + 1), 5500);
+  };
+  root.innerHTML = `<div class="modal-bg w-bg-root"><div class="wrapped" role="dialog" aria-label="Linkgeek Wrapped">
+    <div class="w-prog">${slides.map(() => '<i></i>').join('')}</div>
+    <button class="w-close" data-w="close" title="Fermer">✕</button>
+    <div class="w-stage"></div>
+    <button class="w-nav prev" data-w="prev" aria-label="Précédent"></button><button class="w-nav next" data-w="next" aria-label="Suivant"></button>
+  </div></div>`;
+  const close = () => { clearTimeout(timer); root.innerHTML = ''; root.onclick = null; document.removeEventListener('keydown', key); };
+  const key = (e) => { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') show(idx + 1); if (e.key === 'ArrowLeft') show(idx - 1); };
+  document.addEventListener('keydown', key);
+  root.onclick = async (e) => {
+    if (e.target.classList.contains('w-bg-root')) return close();
+    const b = e.target.closest('[data-w]');
+    if (!b) return;
+    const a = b.dataset.w;
+    if (a === 'close') return close();
+    if (a === 'next') return show(idx + 1);
+    if (a === 'prev') return show(idx - 1);
+    const url = root.querySelector('.w-canvas').toDataURL('image/png');
+    try {
+      if (a === 'save') { const f = await api.saveImage(url, `Linkgeek-recap-${p.title}`); if (f) toast('Image enregistrée'); }
+      if (a === 'copy') { await api.copyImage(url); toast('Image copiée : colle-la où tu veux (Ctrl+V)'); }
+    } catch (err) { toast(errMsg(err), true); }
+  };
+  show(0);
+}
+
 function viewStats() {
   const games = visibleGames();
   if (!games.length) return state.loaded ? emptyLibrary() : loadingView();
@@ -629,15 +1210,28 @@ function viewStats() {
 
   return `
   <div class="page">
-    <div class="page-head"><div><h1>Statistiques</h1><div class="sub">Vue d'ensemble de ta bibliothèque et de ton temps de jeu</div></div></div>
+    <div class="page-head"><div><h1>Statistiques</h1><div class="sub">Vue d'ensemble de ta bibliothèque et de ton temps de jeu</div></div>
+      <div class="wrap-btns">${wrappedButtons()}</div></div>
     <div class="kpis">
-      ${kpi(I.clock, 'Temps de jeu total', fmtHours(t.time), `soit ${(t.time / 86400).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} jours`)}
+      ${(() => { const tracked = games.filter((g) => !OWN_PLAYTIME.has(g.source)).reduce((a, g) => a + g.playtimeSec, 0); return kpi(I.clock, 'Temps de jeu total', fmtHours(t.time), tracked ? `Steam + ${fmtHours(tracked)} suivies par Linkgeek` : 'Temps Steam · autres plateformes non suivies'); })()}
       ${kpi(I.bolt, 'Cette semaine', week ? fmtTime(week) : '—', 'suivi par Linkgeek')}
       ${kpi(I.disk, 'Espace occupé', fmtSize(t.size), `${games.filter((g) => !g.sizeBytes).length ? games.filter((g) => !g.sizeBytes).length + ' taille(s) en calcul' : 'tous les jeux mesurés'}`)}
       ${kpi(I.layers, 'Jeux installés', String(t.count), `${played.length} déjà lancés · ${t.count - played.length} jamais joués`)}
     </div>
 
     <div class="stats-grid">
+      <div class="panel span-12">
+        <h2>Records</h2>
+        ${statsRecords(st.records)}
+      </div>
+      <div class="panel span-7">
+        <h2>Quand tu joues</h2>
+        ${heatmapPanel(allSessions())}
+      </div>
+      <div class="panel span-5">
+        <h2>Comparaisons</h2>
+        ${comparisonsPanel(allSessions())}
+      </div>
       <div class="panel span-7">
         <h2>Top 10 — temps de jeu</h2>
         ${top.length ? `<div class="bars">${top.map((g) => `
@@ -649,6 +1243,10 @@ function viewStats() {
           </div>`).join('')}</div>` : '<div class="empty">Aucun temps de jeu enregistré pour le moment.</div>'}
       </div>
       <div class="panel span-5">
+        <h2>Valeur de ta bibliothèque</h2>
+        ${valuePanel()}
+      </div>
+      <div class="panel span-5">
         <h2>Répartition par plateforme</h2>
         <div class="donut-wrap">
           <div class="donut">
@@ -656,7 +1254,8 @@ function viewStats() {
             <div class="center"><div><b>${fmtSize(t.size)}</b><span>sur le disque</span></div></div>
           </div>
           <div class="legend">
-            ${plat.map((p) => `<div class="legend-row"><span class="dot" style="background:${p.color}"></span><div>${esc(p.label)}<small>${p.count} jeu${p.count > 1 ? 'x' : ''} · ${fmtHours(p.time)}</small></div><span class="v">${fmtSize(p.size)}</span></div>`).join('')}
+            ${plat.map((p) => `<div class="legend-row"><span class="dot" style="background:${p.color}"></span><div>${esc(p.label)}<small>${p.count} jeu${p.count > 1 ? 'x' : ''} · ${OWN_PLAYTIME.has(p.k) ? fmtHours(p.time) : p.time ? `${fmtHours(p.time)} suivies par Linkgeek` : 'temps non suivi'}</small></div><span class="v">${fmtSize(p.size)}</span></div>`).join('')}
+            <p class="legend-note">Seul Steam fournit son propre temps de jeu. Pour les autres plateformes, Linkgeek compte uniquement les parties lancées pendant qu'il est ouvert.</p>
           </div>
         </div>
       </div>
@@ -683,7 +1282,7 @@ function viewStats() {
             <tr data-open="${esc(g.id)}">
               <td><div class="cell-game">${coverHtml(g, 'thumb')}<span>${esc(g.name)}</span></div></td>
               <td><span class="src"><span class="dot ${g.source}"></span>${esc(SOURCES[g.source].label)}</span></td>
-              <td class="num">${esc(fmtTime(g.playtimeSec, '—'))}</td>
+              <td class="num ${!OWN_PLAYTIME.has(g.source) && !g.playtimeSec ? 'dim' : ''}">${esc(playLabel(g, '—'))}</td>
               <td class="num">${fmtSize(g.sizeBytes)}</td>
               <td class="num">${esc(fmtAgo(g.lastPlayed))}</td>
             </tr>`).join('')}</tbody>
@@ -703,25 +1302,7 @@ function avatarHtml(cls, framed = true) {
 }
 const rankName = (key) => (RANKS.find((r) => r.key === key) || {}).name || key;
 
-/* ---- Rank frames around the profile picture ---- */
-function framePicker(p) {
-  const lv = (p.level && p.level.level) || 1;
-  const choice = p.frameChoice || 'auto';
-  const pic = p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : `<div>${esc(initials(p.name || 'Joueur'))}</div>`;
-  const opt = (key, label, sub, unlocked, active, frameKey) => `<button class="fp-opt ${active ? 'active' : ''} ${unlocked ? '' : 'locked'}" ${unlocked ? `data-frame="${key}"` : 'disabled'} title="${esc(sub)}">
-      <span class="fp-pic ${frameKey ? `framed r-${frameKey}` : ''}">${pic}${unlocked ? '' : `<i class="fp-lock">${CROWN_LOCK}</i>`}</span>
-      <b>${esc(label)}</b><small>${esc(sub)}</small>
-    </button>`;
-  const current = [...RANKS].reverse().find((r) => lv >= r.min);
-  return `<section class="section">
-    <div class="section-head"><div><h2>Contour de photo</h2><div class="sub">Chaque rang atteint débloque son contour. Il est visible par tes amis.</div></div></div>
-    <div class="frame-picker">
-      ${opt('auto', 'Automatique', `Rang actuel : ${current ? current.name : '—'}`, true, choice === 'auto', current && current.key)}
-      ${RANKS.map((r) => opt(r.key, r.name, lv >= r.min ? 'Débloqué' : `Niveau ${r.min}`, lv >= r.min, choice === r.key, r.key)).join('')}
-      ${opt('none', 'Aucun', 'Sans contour', true, choice === 'none', null)}
-    </div>
-  </section>`;
-}
+/* ---- Rank frames: chosen in the "Modifier le profil" window ---- */
 const CROWN_LOCK = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 
 function top5() {
@@ -741,29 +1322,27 @@ function viewProfile() {
     <section class="pf-hero">
       <div class="pf-banner" style="background-image:url('${esc(banner ? heroSrc(banner) || '' : '')}')"></div>
       <div class="pf-main">
-        <button class="pf-avatar ${p.frame ? `framed r-${esc(p.frame)}` : ''}" data-pick-avatar title="Changer la photo de profil">
+        <button class="pf-avatar ${p.frame ? `framed r-${esc(p.frame)}` : ''}" data-edit-profile title="Modifier le profil">
           ${avatarHtml('pf-avatar-img', false)}
-          <span class="pf-avatar-edit">${I.image}<span>Changer</span></span>
+          <span class="pf-avatar-edit">${I.edit}<span>Modifier</span></span>
         </button>
         <div class="pf-id">
-          <label for="pf-name">Pseudo</label>
           <div class="pf-name-wrap">
-            <input id="pf-name" class="pf-name" value="${esc(p.name)}" maxlength="32" spellcheck="false" autocomplete="off">
-            ${I.edit}
+            <h1 class="pf-name-txt" title="${esc(p.name)}">${esc(p.name)}</h1>
             ${p.level ? `<button class="pf-badge" data-nav="challenges" title="Voir mes défis">${levelBadge(p.level.level, 'lg')}</button>` : ''}
             ${p.admin ? adminTag(true) : ''}
             ${p.ultimate ? ultimateBadge(true) : ''}
           </div>
-          ${p.title ? `<button class="pf-title" data-nav="shop" title="Changer de titre dans la Boutique">${titleChip(p.title.name, true)}</button>` : ''}
+          ${p.title ? `<button class="pf-title" data-edit-profile title="Changer de titre">${titleChip(p.title.name, true)}</button>` : ''}
           ${p.level ? levelBar(p.level) : ''}
           <div class="pf-sub">
             ${memberLine(p)}
-            ${socialIcons(p.socials, true)}
+            ${socialIcons(p.socials, false)}
             ${p.steamName && p.steamName !== p.name ? `<span>Nom Steam : ${esc(p.steamName)}</span>` : ''}
-            ${p.customAvatar ? `<button class="link" data-reset-avatar>Revenir à la photo Steam</button>` : ''}
           </div>
         </div>
       </div>
+      <button class="pf-edit" data-edit-profile title="Modifier la photo, le pseudo, le titre, le contour, les réseaux et les jeux préférés">${I.edit}<span>Modifier le profil</span></button>
       <div class="pf-stats five">
         <div><b>${fmtHours(t.time)}</b><span>de jeu</span></div>
         <div><b>${t.count}</b><span>jeux installés</span></div>
@@ -773,22 +1352,22 @@ function viewProfile() {
       </div>
     </section>
 
+    ${showcaseSection(p.showcase)}
+
     ${recordsSection(p.records)}
-    ${p.level ? framePicker(p) : ''}
 
     <section class="section">
       <div class="section-head">
-        <div><h2>Mes 5 jeux préférés</h2><div class="sub">Clique sur un bloc pour choisir un jeu · glisse-dépose pour changer l'ordre</div></div>
+        <div><h2>Mes 5 jeux préférés</h2><div class="sub">Modifiables avec « Modifier le profil »</div></div>
       </div>
       <div class="top5">
         ${picks.map((g, i) => g ? `
-          <div class="slot filled" draggable="true" data-slot="${i}">
+          <div class="slot filled" data-open="${esc(g.id)}">
             <div class="rank">${i + 1}</div>
             ${coverHtml(g)}
-            <button class="slot-clear" data-slot-clear="${i}" title="Retirer">✕</button>
             <div class="slot-info"><b title="${esc(g.name)}">${esc(g.name)}</b><span><span class="dot ${g.source}"></span>${esc(fmtTime(g.playtimeSec, 'Pas encore joué'))}</span></div>
           </div>` : `
-          <div class="slot empty" data-slot="${i}">
+          <div class="slot empty" data-edit-profile>
             <div class="rank">${i + 1}</div>
             <div class="slot-empty"><span class="plus"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Choisir un jeu</div>
           </div>`).join('')}
@@ -830,6 +1409,125 @@ function socialIcons(socials, editable = false) {
   }).join('');
   if (!editable) return icons ? `<span class="socials">${icons}</span>` : '';
   return `<span class="socials">${icons}<button class="soc edit" data-edit-socials title="${icons ? 'Modifier mes réseaux' : 'Ajouter mes réseaux (Discord, Twitch, TikTok)'}">${icons ? I.edit : '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>'}${icons ? '' : '<span>Réseaux</span>'}</button></span>`;
+}
+
+/* ---- Profile: 5 achievements on display (chosen in "Modifier le profil") ---- */
+function showcaseMedal(s, size = '') {
+  return `<div class="sc-trophy ${size}">${trophySvg(troArt(s), s.icon)}</div>`;
+}
+function showcaseSection(list) {
+  const slots = list || [null, null, null, null, null];
+  return `<section class="section">
+    <div class="section-head"><div><h2>Succès en vitrine</h2><div class="sub">Tes succès préférés, visibles par tes amis · à choisir avec « Modifier le profil »</div></div></div>
+    <div class="showcase">${slots.map((s, i) => s ? `
+      <button class="sc-slot filled ${esc(s.rarity || rarityOfRank(s.tier))}" data-nav="achievements" title="${esc(s.desc || '')}">
+        ${showcaseMedal(s, 'lg')}
+        <b>${esc(s.name)}</b>
+        <span class="sc-tier">${esc(s.tierName || '')}</span>
+        ${s.at ? `<small>${new Date(s.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</small>` : ''}
+      </button>` : `
+      <button class="sc-slot empty" data-edit-profile title="Choisir un succès">
+        <span class="plus"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span>Emplacement ${i + 1}</span>
+      </button>`).join('')}</div>
+  </section>`;
+}
+
+/* ---- Profile: one window to edit everything ---- */
+async function editProfileModal() {
+  if (!state.shop) { try { state.shop = await api.getShop(); } catch { /* titles unavailable */ } }
+  try { state.ach = await api.getAchievements(); } catch { /* keep the last list */ }
+  const p = state.profile || {};
+  const unlockedAch = ((state.ach && state.ach.items) || []).filter((it) => it.tier >= 1)
+    .sort((a, b) => (b.kind ? 1 : 0) - (a.kind ? 1 : 0) || b.tier - a.tier || a.name.localeCompare(b.name, 'fr'));
+  const curShow = Array.from({ length: 5 }, (_, i) => (p.showcase && p.showcase[i] ? p.showcase[i].key : ''));
+  const draft = {
+    name: p.name || '',
+    title: p.title ? p.title.key : '',
+    frame: p.frameChoice || 'auto',
+    socials: { ...(p.socials || {}) },
+    top5: Array.from({ length: 5 }, (_, i) => (p.top5 && p.top5[i]) || ''),
+  };
+  const root = $('#modal-root');
+  const lv = (p.level && p.level.level) || 1;
+  const current = [...RANKS].reverse().find((r) => lv >= r.min);
+  const frameKey = (f) => (f === 'none' ? null : f === 'auto' ? current && current.key : f);
+  const pic = () => (state.profile.avatar ? `<img src="${esc(state.profile.avatar)}" alt="">` : `<div>${esc(initials(draft.name || 'Joueur'))}</div>`);
+  const titles = ((state.shop && state.shop.titles) || []).filter((t) => t.unlockedAt);
+  const games = [...visibleGames()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+
+  const photoBlock = () => `<div class="ep-photo">
+      <span class="ep-pic fp-pic ${frameKey(draft.frame) ? `framed r-${frameKey(draft.frame)}` : ''}">${pic()}</span>
+      <div class="ep-photo-btns">
+        <button class="ghost" data-ep="photo">${I.image}Changer la photo</button>
+        ${state.profile.customAvatar ? '<button class="link" data-ep="photo-reset">Revenir à la photo par défaut</button>' : ''}
+        <small>Visible par tes amis. Elle est enregistrée tout de suite.</small>
+      </div>
+    </div>`;
+  const frameOpts = () => [['auto', 'Automatique', true], ...RANKS.map((r) => [r.key, r.name, lv >= r.min, r.min]), ['none', 'Aucun', true]]
+    .map(([k, label, ok, min]) => `<button class="ep-frame ${draft.frame === k ? 'active' : ''} ${ok ? '' : 'locked'}" ${ok ? `data-ep-frame="${k}"` : 'disabled'} title="${esc(ok ? label : `Débloqué au niveau ${min}`)}">
+        <span class="fp-pic ${frameKey(k) ? `framed r-${frameKey(k)}` : ''}">${pic()}${ok ? '' : `<i class="fp-lock">${CROWN_LOCK}</i>`}</span><small>${esc(label)}</small></button>`).join('');
+
+  root.innerHTML = `<div class="modal-bg"><div class="modal ep-modal" role="dialog" aria-label="Modifier le profil">
+    <div class="ep-head"><h2>${I.edit}Modifier le profil</h2><button class="ep-x" data-ep="cancel" title="Fermer">✕</button></div>
+    <div class="ep-body">
+      <section class="ep-sec"><h3>Photo de profil</h3><div id="ep-photo">${photoBlock()}</div></section>
+      <section class="ep-sec"><h3>Pseudo</h3><input id="ep-name" class="ep-input" maxlength="32" value="${esc(draft.name)}" spellcheck="false" autocomplete="off"></section>
+      <section class="ep-sec"><h3>Titre</h3>
+        <select id="ep-title" class="ep-input"><option value="">Aucun titre</option>${titles.map((t) => `<option value="${esc(t.key)}" ${draft.title === t.key ? 'selected' : ''}>« ${esc(t.name)} »</option>`).join('')}</select>
+        <small class="ep-hint">${titles.length ? 'Affiché sous ton pseudo.' : 'Aucun titre débloqué pour l\'instant : remplis leurs conditions (Boutique → Titres).'}</small></section>
+      <section class="ep-sec"><h3>Contour de photo</h3><div class="ep-frames" id="ep-frames">${frameOpts()}</div></section>
+      <section class="ep-sec"><h3>Réseaux</h3>
+        ${Object.entries(SOCIALS).map(([k, n]) => `<label class="soc-field"><span class="soc ${k}">${n.icon}</span>
+          <input id="ep-soc-${k}" class="ep-input" value="${esc(draft.socials[k] || '')}" placeholder="${k === 'discord' ? 'pseudo ou identifiant' : k === 'twitch' ? 'nom de la chaîne' : '@pseudo'}" spellcheck="false" autocomplete="off"></label>`).join('')}
+        <small class="ep-hint">Laisse vide pour retirer. Discord : un identifiant numérique rend l'icône cliquable.</small></section>
+      <section class="ep-sec"><h3>Succès en vitrine</h3>
+        <div class="ep-top5">${curShow.map((k, i) => `<label><span>${i + 1}</span><select id="ep-show-${i}" class="ep-input"><option value="">— Vide —</option>${unlockedAch.map((it) => `<option value="${esc(it.key)}" ${k === it.key ? 'selected' : ''}>${esc(it.name)} · ${esc(it.tiers[it.tier - 1].name)}</option>`).join('')}</select></label>`).join('')}</div>
+        <small class="ep-hint">${unlockedAch.length ? `Seuls tes succès débloqués sont proposés (${unlockedAch.length}).` : 'Débloque un succès pour pouvoir l\'afficher ici.'}</small></section>
+      <section class="ep-sec"><h3>Mes 5 jeux préférés</h3>
+        <div class="ep-top5">${draft.top5.map((id, i) => `<label><span>${i + 1}</span><select id="ep-top-${i}" class="ep-input"><option value="">— Aucun —</option>${games.map((g) => `<option value="${esc(g.id)}" ${id === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>`).join('')}</div></section>
+    </div>
+    <div class="row ep-foot"><button class="ghost" data-ep="cancel">Annuler</button><button class="primary" data-ep="save">Enregistrer</button></div>
+  </div></div>`;
+  $('#ep-name').focus();
+
+  const close = () => { root.innerHTML = ''; root.onclick = null; document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  root.onclick = async (e) => {
+    if (e.target.classList.contains('modal-bg')) return close();
+    const fr = e.target.closest('[data-ep-frame]');
+    if (fr) { draft.frame = fr.dataset.epFrame; $('#ep-frames').innerHTML = frameOpts(); $('#ep-photo').innerHTML = photoBlock(); return; }
+    const b = e.target.closest('[data-ep]');
+    if (!b) return;
+    const a = b.dataset.ep;
+    if (a === 'cancel') return close();
+    if (a === 'photo' || a === 'photo-reset') {
+      const r = a === 'photo' ? await api.pickAvatar() : await api.resetAvatar();
+      if (r) { state.profile = r; $('#ep-photo').innerHTML = photoBlock(); $('#ep-frames').innerHTML = frameOpts(); renderSidebar(); render(true); }
+      return;
+    }
+    if (a !== 'save') return;
+    b.disabled = true;
+    try {
+      const name = $('#ep-name').value.trim();
+      const title = $('#ep-title').value;
+      const socials = Object.fromEntries(Object.keys(SOCIALS).map((k) => [k, $(`#ep-soc-${k}`).value.trim()]));
+      const top = draft.top5.map((_, i) => $(`#ep-top-${i}`).value || null);
+      const seen = new Set();
+      const top5 = top.map((id) => (id && !seen.has(id) ? (seen.add(id), id) : null)); // the same game only once
+      if (name && name !== p.name) state.profile = await api.setProfileName(name);
+      if (draft.frame !== (p.frameChoice || 'auto')) state.profile = await api.setFrame(draft.frame);
+      if (title !== (p.title ? p.title.key : '')) { const r = await api.equipTitle(title || null); state.shop = r.shop; state.profile = r.profile; }
+      if (JSON.stringify(socials) !== JSON.stringify(Object.fromEntries(Object.keys(SOCIALS).map((k) => [k, (p.socials || {})[k] || ''])))) state.profile = await api.setSocials(socials);
+      if (JSON.stringify(top5) !== JSON.stringify(draft.top5.map((x) => x || null))) state.profile = await api.setTop5(top5);
+      const show = curShow.map((_, i) => $(`#ep-show-${i}`).value || null);
+      if (JSON.stringify(show) !== JSON.stringify(curShow.map((x) => x || null))) state.profile = await api.setShowcase(show);
+      close();
+      renderSidebar(); render(true);
+      toast('Profil enregistré');
+    } catch (err) { b.disabled = false; toast(errMsg(err), true); }
+  };
 }
 
 function editSocialsModal() {
@@ -1184,6 +1882,7 @@ function friendProfileModal(uid) {
       <div>${I.calendar}<span>Série de jours joués</span><b>${c.records.bestStreak || 0} jour${c.records.bestStreak > 1 ? 's' : ''}</b></div>
       <div>${I.trophy}<span>Jeu du mois</span><b title="${esc(c.records.monthGame || '')}">${esc(c.records.monthGame || '—')}</b></div>
     </div>` : ''}
+    ${Object.values(c.showcase || {}).filter(Boolean).length ? `<div class="fp-show"><span class="fp-show-l">Succès en vitrine</span><div>${Object.values(c.showcase).filter(Boolean).map((sc) => `<div class="fp-show-it" title="${esc(sc.name)}">${showcaseMedal(sc)}<b>${esc(sc.name)}</b></div>`).join('')}</div></div>` : ''}
     ${c.top ? `<div class="fp-top">
       <div class="fp-cover">${cover(c.top)}</div>
       <div><span>Jeu le plus joué</span><b>${esc(c.top.name)}</b><small>${String(c.top.hours).replace('.', ',')} h de jeu</small></div>
@@ -1429,7 +2128,7 @@ function viewChallenges() {
     </section>` : ''}
     ${c.history.length ? `<section class="section">
       <div class="section-head"><h2>XP gagnée récemment</h2></div>
-      <div class="panel ch-history">${c.history.map((h) => `<div><span class="ch-kind">${h.kind === 'daily' ? 'Jour' : h.kind === 'weekly' ? 'Semaine' : h.kind === 'admin' ? 'Admin' : 'Unique'}</span><b>${esc(h.title)}</b><span class="ch-when">${esc(fmtAgo(h.at))}</span><span class="ch-xp${h.xp < 0 ? ' neg' : ''}">${signedXp(h.xp)} XP</span></div>`).join('')}</div>
+      <div class="panel ch-history">${c.history.map((h) => `<div><span class="ch-kind">${h.kind === 'daily' ? 'Jour' : h.kind === 'weekly' ? 'Semaine' : h.kind === 'admin' ? 'Admin' : h.kind === 'wheel' ? 'Roulette' : 'Unique'}</span><b>${esc(h.title)}</b><span class="ch-when">${esc(fmtAgo(h.at))}</span><span class="ch-xp${h.xp < 0 ? ' neg' : ''}">${signedXp(h.xp)} XP</span></div>`).join('')}</div>
     </section>` : ''}
   </div>`;
 }
@@ -1446,6 +2145,7 @@ async function loadChallenges() {
 function onChallengesDone(r) {
   if (state.profile) state.profile.level = r.level;
   for (const c of r.completed.slice(0, 4)) {
+    if (c.kind === 'wheel') continue; // the wheel shows its own result
     const t = document.createElement('div');
     t.className = 'toast ach ch';
     const label = c.kind === 'admin' ? 'Administrateur' : `Défi ${c.kind === 'daily' ? 'du jour' : c.kind === 'weekly' ? 'de la semaine' : 'unique'} terminé`;
@@ -1498,18 +2198,22 @@ function viewShop() {
   const head = `<div class="page-head"><div><h1>Boutique</h1><div class="sub">Dépense tes jetons pour personnaliser Linkgeek</div></div></div>`;
   if (!s) return `<div class="page">${head}</div>`;
   const cur = state.settings && state.settings.theme;
+  const lvl = s.level || 1;
   const card = (t) => {
-    const afford = s.coins >= t.price;
+    const lockedLvl = !t.owned && lvl < (t.minLevel || 1);
+    const afford = s.coins >= t.price && !lockedLvl;
     const active = cur === t.id;
-    return `<div class="shop-card ${t.owned ? 'owned' : ''} ${active ? 'active' : ''}">
+    return `<div class="shop-card rar-${esc(t.rarity || 'common')} ${t.owned ? 'owned' : ''} ${active ? 'active' : ''} ${lockedLvl ? 'lvl-locked' : ''}">
+      <span class="rar-tag ${esc(t.rarity || 'common')}">${esc(((s.rarities || {})[t.rarity] || {}).name || 'Commun')}</span>
       ${themePreview(t)}
+      ${lockedLvl ? `<div class="shop-lvl-lock">${CROWN_LOCK}<b>Niveau ${t.minLevel} requis</b><small>Tu es niveau ${lvl} · encore ${t.minLevel - lvl} niveau${t.minLevel - lvl > 1 ? 'x' : ''}</small></div>` : ''}
       <div class="shop-meta">
         <div><b>${esc(t.name)}</b><span>${esc(t.desc)}</span></div>
         ${t.owned
           ? (active ? '<span class="chip live">✓ Appliqué</span>' : `<button class="btn-glass sm" data-shop-apply="${t.id}">Appliquer</button>`)
-          : `<button class="btn-play sm ${afford ? '' : 'disabled'}" data-shop-buy="${t.id}" ${afford ? '' : 'title="Pas assez de jetons"'}>${COIN}${fmtCoins(t.price)}</button>`}
+          : `<button class="btn-play sm ${afford ? '' : 'disabled'}" data-shop-buy="${t.id}" ${afford ? '' : `title="${lockedLvl ? `Niveau ${t.minLevel} requis` : 'Pas assez de jetons'}"`}>${COIN}${fmtCoins(t.price)}</button>`}
       </div>
-      ${!t.owned && !afford ? `<div class="shop-miss">Encore ${fmtCoins(t.price - s.coins)} jetons</div>` : ''}
+      ${!t.owned && !afford && !lockedLvl ? `<div class="shop-miss">Encore ${fmtCoins(t.price - s.coins)} jetons</div>` : ''}
     </div>`;
   };
   const ownedCount = s.themes.filter((t) => t.owned).length;
@@ -1520,14 +2224,23 @@ function viewShop() {
       <div class="shop-bal"><span>Mes jetons</span><b>${fmtCoins(s.coins)}</b></div>
       <div class="shop-earn">
         <b>Comment en gagner ?</b>
-        <span>✓ Chaque défi terminé : 1 jeton pour ${s.rates.perXp} XP (un défi à 60 XP = 12 jetons)</span>
+        <span>✓ Chaque défi terminé : 1 jeton pour ${s.rates.perXp} XP (un défi à 80 XP = ${Math.round(80 / s.rates.perXp)} jetons)</span>
         <span>⬆ Chaque nouveau niveau : 20 + 5 × le niveau (niveau 20 = 120 jetons)</span>
+        <span>🔒 Thèmes rares dès le niveau ${((s.rarities || {}).rare || {}).minLevel || 15}, épiques dès le niveau ${((s.rarities || {}).epic || {}).minLevel || 40}</span>
       </div>
       <button class="ghost" data-nav="challenges">Voir mes défis</button>
     </div>
+    ${s.wheel ? wheelSection(s) : ''}
     <section class="section">
       <div class="section-head"><div><h2>Thèmes</h2><div class="sub">${ownedCount} / ${s.themes.length} possédés · les thèmes achetés apparaissent aussi dans Paramètres → Apparence</div></div></div>
-      <div class="shop-grid">${s.themes.map(card).join('')}</div>
+      ${['common', 'rare', 'epic'].map((r) => {
+        const list = s.themes.filter((t) => (t.rarity || 'common') === r);
+        if (!list.length) return '';
+        const info = { common: 'Une nouvelle palette de couleurs', rare: 'Couleurs + fond animé', epic: 'Effets animés exclusifs dans toute l\'application' }[r];
+        const need = ((s.rarities || {})[r] || {}).minLevel || 1;
+        return `<div class="rar-head ${r}"><b>${esc(((s.rarities || {})[r] || {}).name || r)}</b><span>${esc(info)}</span>${need > 1 ? `<em class="rar-lvl ${lvl >= need ? 'ok' : ''}">${lvl >= need ? '✓' : '🔒'} Niveau ${need}</em>` : ''}<i>${list.filter((t) => t.owned).length} / ${list.length}</i></div>
+          <div class="shop-grid">${list.map(card).join('')}</div>`;
+      }).join('')}
     </section>
     ${(s.titles || []).length ? `<section class="section">
       <div class="section-head"><div><h2>Titres</h2><div class="sub">${s.titles.filter((t) => t.unlockedAt).length} / ${s.titles.length} débloqués · ils ne s'achètent pas : remplis la condition pour les gagner, puis affiche-en un sous ton pseudo</div></div></div>
@@ -1538,6 +2251,145 @@ function viewShop() {
       <div class="panel shop-log">${s.log.map((l) => `<div><span>${esc(l.why)}</span><small>${esc(fmtAgo(l.at))}</small><b class="${l.n < 0 ? 'neg' : 'pos'}">${l.n > 0 ? '+' : '−'}${fmtCoins(Math.abs(l.n))}</b></div>`).join('')}</div>
     </section>` : ''}
   </div>`;
+}
+
+/* ---- Shop: daily wheel (1 free spin per day, slices sized by their odds) ---- */
+// in: colour near the hub, out: colour at the rim, fill: legend chip
+const WHEEL_STYLE = {
+  c10: { in: '#3a2c0c', out: '#8a6a1c', fill: '#8a6a1c' },
+  x15: { in: '#1d1546', out: '#5a46b8', fill: '#5a46b8' },
+  c25: { in: '#5a400a', out: '#d29d22', fill: '#d29d22' },
+  x35: { in: '#2b1d70', out: '#8466ff', fill: '#8466ff' },
+  c50: { in: '#8a5f06', out: '#ffd85e', fill: '#ffd85e' },
+  theme: { in: '#ff2bd6', out: '#22d3ee', fill: 'linear-gradient(135deg,#ff2bd6,#a855f7,#22d3ee)' },
+};
+const prizeLabel = (p) => (p.kind === 'coins' ? `${p.n} jetons` : p.kind === 'xp' ? `${p.n} XP` : 'Un thème au hasard');
+
+/** Rotating disc: gradient slices sized by their odds, gold separators and pegs,
+ *  an icon (coin / XP badge / star) and the amount in each slice. */
+function wheelSvg(w, winKey) {
+  const R = 100, rad = (d) => (d * Math.PI) / 180;
+  const pt = (a, r = R) => [100 + r * Math.sin(rad(a)), 100 - r * Math.cos(rad(a))].map((v) => v.toFixed(2)).join(' ');
+  let a = 0;
+  const defs = [];
+  const seps = [];
+  const pegs = [];
+  const slices = w.segments.map((p) => {
+    const a0 = a, a1 = a + p.pct * 3.6; a = a1;
+    const span = a1 - a0, mid = (a0 + a1) / 2;
+    const st = WHEEL_STYLE[p.key] || { in: '#222', out: '#555' };
+    defs.push(p.kind === 'theme'
+      ? `<linearGradient id="wg-${p.key}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff2bd6"/><stop offset=".5" stop-color="#a855f7"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>`
+      : `<radialGradient id="wg-${p.key}" cx="100" cy="100" r="100" gradientUnits="userSpaceOnUse"><stop offset=".15" stop-color="${st.in}"/><stop offset="1" stop-color="${st.out}"/></radialGradient>`);
+    seps.push(`<path d="M100 100L${pt(a0, 98)}"/>`);
+    const [px, py] = pt(a0, 94).split(' ');
+    pegs.push(`<circle cx="${px}" cy="${py}" r="2.4"/>`);
+    const d = `M100 100 L${pt(a0)} A${R} ${R} 0 ${span > 180 ? 1 : 0} 1 ${pt(a1)} Z`;
+    let icon = '';
+    if (p.kind === 'coins') icon = `<circle cx="100" cy="${span >= 40 ? 22 : 20}" r="${span >= 40 ? 8 : 6.5}" fill="url(#wg-coin)" stroke="#6b4604" stroke-width="1"/><circle cx="100" cy="${span >= 40 ? 22 : 20}" r="${span >= 40 ? 5 : 4}" fill="none" stroke="rgba(110,70,0,.65)" stroke-width="1"/>`;
+    else if (p.kind === 'xp') icon = `<rect x="${span >= 40 ? 89 : 91}" y="${span >= 40 ? 15 : 14}" width="${span >= 40 ? 22 : 18}" height="${span >= 40 ? 13 : 11}" rx="3.5" fill="#efe9ff" stroke="#4b33c4" stroke-width="1"/><text x="100" y="${span >= 40 ? 25 : 22.6}" class="wh-xp">XP</text>`;
+    else icon = `<path d="M100 7l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z" fill="#fff" stroke="rgba(80,0,90,.5)" stroke-width=".6"/>`;
+    const num = p.kind === 'theme' ? '' : `<text x="100" y="${span >= 60 ? 52 : span >= 40 ? 50 : 42}" class="wh-n ${span >= 60 ? 'big' : span < 35 ? 'sm' : ''}">${p.n}</text>`;
+    const win = winKey === p.key ? `<path d="${d}" class="wh-win"/>` : '';
+    return `<path d="${d}" fill="url(#wg-${p.key})"/>${win}<g transform="rotate(${mid.toFixed(2)} 100 100)">${icon}${num}</g>`;
+  }).join('');
+  return `<svg viewBox="0 0 200 200" class="wh-svg">
+    <defs>${defs.join('')}<linearGradient id="wg-coin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff3b0"/><stop offset=".5" stop-color="#f2b92c"/><stop offset="1" stop-color="#a86d0c"/></linearGradient></defs>
+    <circle cx="100" cy="100" r="100" fill="#0c0f16"/>
+    ${slices}
+    <g stroke="rgba(255,226,150,.75)" stroke-width="1.1">${seps.join('')}</g>
+    <g fill="url(#wg-coin)" stroke="#6b4604" stroke-width=".6">${pegs.join('')}</g>
+  </svg>`;
+}
+
+/** Static frame drawn over the disc: gold ring with blinking bulbs, inner shading and a glass highlight. */
+function wheelFrame() {
+  const bulbs = Array.from({ length: 24 }, (_, i) => {
+    const t = (i * 15 * Math.PI) / 180;
+    return `<circle class="wh-bulb ${i % 2 ? 'b2' : ''}" cx="${(150 + 140 * Math.sin(t)).toFixed(1)}" cy="${(150 - 140 * Math.cos(t)).toFixed(1)}" r="3.6"/>`;
+  }).join('');
+  return `<svg class="wheel-frame" viewBox="0 0 300 300" aria-hidden="true">
+    <defs>
+      <linearGradient id="wf-gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff1b0"/><stop offset=".3" stop-color="#f2b92c"/><stop offset=".55" stop-color="#8a5a06"/><stop offset=".8" stop-color="#f2c445"/><stop offset="1" stop-color="#ffe58a"/></linearGradient>
+      <radialGradient id="wf-shade" cx="150" cy="150" r="131" gradientUnits="userSpaceOnUse"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></radialGradient>
+      <linearGradient id="wf-gloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    </defs>
+    <circle cx="150" cy="150" r="131" fill="url(#wf-shade)"/>
+    <ellipse cx="150" cy="92" rx="100" ry="58" fill="url(#wf-gloss)"/>
+    <circle cx="150" cy="150" r="140" fill="none" stroke="url(#wf-gold)" stroke-width="18"/>
+    <circle cx="150" cy="150" r="149" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="1"/>
+    <circle cx="150" cy="150" r="131" fill="none" stroke="rgba(60,35,0,.8)" stroke-width="1.5"/>
+    ${bulbs}
+  </svg>`;
+}
+const WHEEL_POINTER = `<svg viewBox="0 0 36 46" aria-hidden="true"><defs>
+  <linearGradient id="wp-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff1b0"/><stop offset=".5" stop-color="#f2b92c"/><stop offset="1" stop-color="#9a6408"/></linearGradient>
+  <radialGradient id="wp-r" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#ffb3c2"/><stop offset=".5" stop-color="#ff2e63"/><stop offset="1" stop-color="#8a0024"/></radialGradient></defs>
+  <path d="M18 44L4.5 17A14 14 0 1 1 31.5 17Z" fill="url(#wp-g)" stroke="#6b4604" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="18" cy="14" r="6.5" fill="url(#wp-r)" stroke="#6b4604" stroke-width="1"/><circle cx="16" cy="12" r="2" fill="#fff" opacity=".8"/></svg>`;
+
+function wheelSection(s) {
+  const w = s.wheel;
+  const spinning = !!state.wheelSpinning;
+  const left = Math.max(0, w.nextAt - Date.now());
+  const wait = `${Math.floor(left / 3600000)} h ${String(Math.floor(left / 60000) % 60).padStart(2, '0')} min`;
+  const last = state.wheelResult || (w.last && dayStr(w.last.at) === dayStr(Date.now()) ? w.last : null);
+  const lastTxt = (p) => (p.kind === 'theme' ? (p.theme ? `le thème ${p.theme.name}` : `${p.duplicate} jetons (tu avais déjà tous les thèmes)`) : prizeLabel(p));
+  return `<section class="section">
+    <div class="section-head"><div><h2>Roulette du jour</h2><div class="sub">Un tour gratuit chaque jour · remis à zéro à minuit</div></div></div>
+    <div class="panel wheel-panel">
+      <div class="wheel-box ${w.free && !spinning ? 'ready' : ''} ${spinning ? 'spinning' : ''}">
+        <div class="wheel-rot" style="transform:rotate(${state.wheelRot || 0}deg)">${wheelSvg(w, !spinning && state.wheelResult ? state.wheelResult.key : null)}</div>
+        ${wheelFrame()}
+        <div class="wheel-pointer">${WHEEL_POINTER}</div>
+        <div class="wheel-hub">${COIN}</div>
+      </div>
+      <div class="wheel-side">
+        ${w.free && !spinning
+          ? '<button class="btn-play wheel-go" data-wheel-spin>Tourner la roulette</button><span class="wheel-hint">Ton tour gratuit d\'aujourd\'hui est disponible !</span>'
+          : `<button class="btn-play wheel-go disabled" disabled>${spinning ? 'La roue tourne…' : 'Déjà tourné aujourd\'hui'}</button><span class="wheel-hint">${spinning ? 'Bonne chance !' : `Prochain tour gratuit dans ${wait}`}</span>`}
+        ${last && !spinning ? `<div class="wheel-last"><small>Gain d'aujourd'hui</small><b>${esc(lastTxt(last))}</b></div>` : ''}
+        <div class="wheel-odds">${w.segments.map((p) => `<div><i style="background:${(WHEEL_STYLE[p.key] || {}).fill || '#555'}"></i><span>${esc(prizeLabel(p))}</span><b>${p.pct} %</b></div>`).join('')}</div>
+        <p class="wheel-note">Si tu as déjà tous les thèmes de la Boutique, le thème est remplacé par ${w.duplicate} jetons.</p>
+      </div>
+    </div>
+  </section>`;
+}
+const dayStr = (t) => new Date(t).toDateString();
+
+async function spinWheel(btn) {
+  if (state.wheelSpinning) return;
+  btn.disabled = true;
+  let r;
+  try { r = await api.spinWheel(); } catch (e) { btn.disabled = false; return toast(errMsg(e), true); }
+  // angle of the prize inside the wheel (0 = top, clockwise), a bit away from the slice edges
+  let a = 0, theta = 0;
+  for (const p of state.shop.wheel.segments) {
+    const span = p.pct * 3.6;
+    if (p.key === r.prize.key) { theta = a + span * (0.2 + Math.random() * 0.6); break; }
+    a += span;
+  }
+  const cur = state.wheelRot || 0;
+  const target = cur - (cur % 360) + 360 * 6 + ((360 - theta) % 360);
+  state.wheelSpinning = true;
+  state.wheelRot = target;
+  const el = $('.wheel-rot');
+  const side = $('.wheel-side .wheel-go');
+  if (side) { side.textContent = 'La roue tourne…'; side.classList.add('disabled'); }
+  const box = $('.wheel-box');
+  if (box) { box.classList.remove('ready'); box.classList.add('spinning'); setTimeout(() => box.classList.remove('spinning'), 4300); }
+  if (el) { el.classList.add('spin'); requestAnimationFrame(() => { el.style.transform = `rotate(${target}deg)`; }); }
+  await new Promise((res) => setTimeout(res, el ? 5200 : 0));
+  state.wheelSpinning = false;
+  state.wheelResult = r.prize;
+  state.shop = r.shop; state.profile = r.profile;
+  if (r.challenges) { state.chal = r.challenges; setRanks(r.challenges.ranks); }
+  render(true); renderSidebar();
+  const p = r.prize;
+  if (p.kind === 'coins') coinToast(p.n, 'Roulette du jour');
+  else if (p.kind === 'xp') toast(`Roulette du jour : +${p.n} XP`, false, true);
+  else if (p.theme) toast(`Jackpot ! Tu gagnes le thème ${p.theme.name} 🎉 Applique-le dans la liste des thèmes.`, false, true);
+  else coinToast(p.duplicate, 'Roulette : thème remplacé par des jetons');
 }
 
 /* ---- Profile titles ---- */
@@ -1604,6 +2456,7 @@ async function shopClick(t) {
     }
     if (d.shopBuy) {
       const it = state.shop.themes.find((x) => x.id === d.shopBuy);
+      if ((state.shop.level || 1) < (it.minLevel || 1)) return toast(`Niveau ${it.minLevel} requis`, true);
       if (state.shop.coins < it.price) return toast(`Il te manque ${fmtCoins(it.price - state.shop.coins)} jetons pour ce thème`, true);
       if (!(await confirmModal(`Acheter le thème ${it.name} ?`, `Il coûte ${fmtCoins(it.price)} jetons. Il te restera ${fmtCoins(state.shop.coins - it.price)} jetons. Le thème sera appliqué tout de suite.`, 'Acheter', false))) return;
       const r = await api.buyShop(it.id, true);
@@ -1628,7 +2481,7 @@ async function shopClick(t) {
 /* ---------------- Achievements ---------------- */
 const ACH_ICONS = {
   duo: '<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M2.5 19a5.5 5.5 0 0 1 11 0M10.5 19a5.5 5.5 0 0 1 11 0"/></svg>',
-  pad: I.pad, clock: I.clock, bolt: I.bolt, calendar: I.calendar, layers: I.layers, disk: I.disk, star: I.star, play: I.play,
+  pad: I.pad, clock: I.clock, bolt: I.bolt, calendar: I.calendar, layers: I.layers, disk: I.disk, star: I.star, play: I.play, image: I.image,
   heart: '<svg viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-9-9.3C2 7.4 4.2 4.5 7.3 4.5c2 0 3.5 1.1 4.7 2.8 1.2-1.7 2.7-2.8 4.7-2.8 3.1 0 5.3 2.9 4.3 6.2C19.5 15.4 12 20 12 20z"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
   crown: '<svg viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg>',
@@ -1654,41 +2507,205 @@ function medal(it, size = '') {
   return `<div class="a-medal ${TIER_CLS[it.tier]} ${size}">${ACH_ICONS[it.icon] || I.trophy}</div>`;
 }
 
-/* Secret trophies ("???" until unlocked) and the ultimate trophy */
-function specialCard(it) {
-  const done = it.tier >= 1;
-  const t = it.tiers[0];
-  const cls = it.kind === 'ultimate' ? 'ultimate' : 'secret';
-  return `<div class="a-card panel ${cls} ${done ? 'got' : 'locked'}">
-    <div class="a-medal ${cls} ${done ? '' : 'locked'}">${done ? ACH_ICONS[it.icon] || I.trophy : '<b>?</b>'}</div>
-    <div class="a-body">
-      <div class="a-title"><b>${esc(it.name)}</b>${done ? `<span class="a-tag ${cls}">${esc(t.name)}</span>` : `<span class="a-tag dim">${it.kind === 'ultimate' ? 'Ultime' : 'Secret'}</span>`}</div>
-      <div class="a-desc">${esc(t.desc)}</div>
-      <div class="a-hint">${done ? `Débloqué le ${new Date(t.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} · ${t.points} pts` : it.kind === 'ultimate' ? `${t.points} pts · le dernier trophée de Linkgeek` : `${t.points} pts · trophée caché`}</div>
-    </div>
-  </div>`;
-}
-
 function ultimateBadge(big = false) {
   return `<span class="ult-badge${big ? ' big' : ''}" title="Trophée « Linkgeek Ultime » : tous les trophées au rang maximum">${ACH_ICONS.gem}${big ? 'Ultime' : ''}</span>`;
 }
 
-function achCard(it) {
-  if (it.kind) return specialCard(it);
-  const done = it.tier >= 4;
-  const next = it.tiers[Math.min(it.tier, 3)];
-  const prevGoal = it.tier > 0 ? it.tiers[it.tier - 1].goal : 0;
-  const pct = done ? 100 : Math.max(0, Math.min(100, ((it.value - prevGoal) / (next.goal - prevGoal)) * 100));
-  const last = it.tier > 0 ? it.tiers[it.tier - 1] : null;
-  return `<div class="a-card panel ${TIER_CLS[it.tier]}">
-    ${medal(it)}
-    <div class="a-body">
-      <div class="a-title"><b>${esc(it.name)}</b>${it.tier ? `<span class="a-tag ${TIER_CLS[it.tier]}">${esc(last.name)}</span>` : ''}</div>
-      <div class="a-desc">${done ? `Terminé : ${esc(last.desc.charAt(0).toLowerCase() + last.desc.slice(1))}` : `${it.tier ? 'Prochain palier : ' : ''}${esc(next.desc)}`}</div>
-      ${it.hint && !done ? `<div class="a-hint">${esc(it.hint)}</div>` : ''}
-      <div class="a-prog"><div class="a-bar"><i class="${TIER_CLS[Math.min(it.tier + 1, 4)]}" style="width:${pct.toFixed(1)}%"></i></div>
-        <span>${done ? fmtAch(it.value, it.unit) : `${fmtAch(it.value, it.unit)} / ${fmtAch(next.goal, it.unit)}`}</span></div>
-      <div class="a-pips">${it.tiers.map((t, i) => `<span class="a-pip ${i < it.tier ? TIER_CLS[i + 1] : ''}" title="${esc(`${t.name} · ${t.desc} · ${t.points} pts${t.at ? ` · obtenu le ${new Date(t.at).toLocaleDateString('fr-FR')}` : ''}`)}">${esc(t.name)}</span>`).join('')}</div>
+/* ---- Trophies page: one rarity per trophy (15 Bronze, 12 Argent, 5 Or, 1 Platine) ----
+ * Every trophy is a portrait card (like a game cover) with a cup drawn in the
+ * colour of its rarity. Locked ones are greyed with their progress. */
+const RARITY = {
+  bronze: { name: 'Bronze', pts: 15, rank: 1, sub: 'Les premiers pas', stops: ['#ffd2a6', '#d88a4a', '#8a4a1f'] },
+  silver: { name: 'Argent', pts: 30, rank: 2, sub: 'Un vrai investissement', stops: ['#ffffff', '#c9d2de', '#7d8898'] },
+  gold: { name: 'Or', pts: 90, rank: 3, sub: 'Pour les plus acharnés', stops: ['#fff1b0', '#f2b92c', '#a86d0c'] },
+  platinum: { name: 'Platine', pts: 300, rank: 4, sub: 'Tous les trophées de Linkgeek', stops: ['#f2fbff', '#9fd8ff', '#b9a6ff'] },
+};
+const RARITY_ORDER = ['platinum', 'gold', 'silver', 'bronze'];
+const rarityOfRank = (n) => ['bronze', 'bronze', 'silver', 'gold', 'platinum'][n] || 'bronze';
+const COLLECTOR_RANKS = [[0, 'Débutant'], [10, 'Amateur'], [25, 'Chasseur'], [45, 'Expert'], [70, 'Maître'], [90, 'Légende']];
+
+/* Metal look per rarity: horizontal stops dark → highlight → mid → shadow → mid,
+ * which reads as a polished, rounded cup. Platinum is prismatic. */
+const TRO_METAL = {
+  bronze: ['#5a2b0e', '#f0b27e', '#c27a3f', '#743c15', '#a5602b'],
+  silver: ['#5d6878', '#ffffff', '#c9d2dd', '#737f94', '#b3becb'],
+  gold: ['#7a4c03', '#fff6c8', '#f6c23a', '#a06706', '#e3a51e'],
+  platinum: ['#76a6dc', '#ffffff', '#a9dcff', '#c9b8ff', '#ffd3f2'],
+};
+const TRO_GLOW = { gold: '#ffc93c', platinum: '#a9dcff' };
+const TRO_SPARK = 'M0-7 1.7-1.7 7 0 1.7 1.7 0 7-1.7 1.7-7 0-1.7-1.7Z';
+let TRO_UID = 0;
+
+/** Two mirrored laurel branches around (cx, cy), from angle t0 to t1 (0 = bottom, 90 = side). */
+function troLaurel(cx, cy, R, t0, t1, n, fill) {
+  const f = (v) => v.toFixed(1);
+  let s = '';
+  for (let i = 0; i < n; i++) {
+    const t = ((t0 + ((t1 - t0) * i) / (n - 1)) * Math.PI) / 180;
+    const k = 1 - i / (n * 1.9);
+    for (const side of [1, -1]) {
+      const px = cx - (R + side * 3.2) * Math.sin(t);
+      const py = cy + (R + side * 3.2) * Math.cos(t);
+      const deg = (Math.atan2(-Math.sin(t), -Math.cos(t)) * 180) / Math.PI + side * 30;
+      for (const mirror of [false, true]) {
+        const x = mirror ? 2 * cx - px : px;
+        const d = mirror ? 180 - deg : deg;
+        s += `<ellipse cx="${f(x)}" cy="${f(py)}" rx="${f(6.2 * k)}" ry="${f(2.5 * k)}" transform="rotate(${d.toFixed(0)} ${f(x)} ${f(py)})" fill="${fill}"/>`;
+      }
+    }
+  }
+  const end = (t1 * Math.PI) / 180;
+  const ex = cx - R * Math.sin(end), ey = cy + R * Math.cos(end);
+  const big = t1 > 180 ? 1 : 0;
+  s += `<path d="M${cx} ${cy + R}A${R} ${R} 0 ${big} 1 ${f(ex)} ${f(ey)}M${cx} ${cy + R}A${R} ${R} 0 ${big} 0 ${f(2 * cx - ex)} ${f(ey)}" stroke="${fill}" stroke-width="1.6" fill="none"/>`;
+  return s;
+}
+
+/** A trophy cup in its rarity's metal; the rarer it is, the more ornate:
+ *  Bronze = plain cup · Argent = rim, medallion, curled handles, 2-tier base ·
+ *  Or = + star finial, laurels, halo, rays, sheen, sparkles ·
+ *  Platine = + prismatic shimmer, gem, full wreath, rotating rays, more sparkles. */
+function trophySvg(rarity, icon, locked = false, secret = false) {
+  if (rarity === 'secret') return secretTrophySvg(icon, locked, secret);
+  const rr = RARITY[rarity] ? rarity : 'bronze';
+  const lvl = RARITY[rr].rank;
+  const live = !locked;
+  const u = `tr${++TRO_UID}`;
+  const M = `url(#${u}m)`;
+  const metal = TRO_METAL[rr];
+  const inner = (ACH_ICONS[icon] || I.trophy).replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+  const cup = lvl >= 3 ? 'M29 18h62v24c0 26-14 44-31 44S29 68 29 42z' : lvl === 2 ? 'M30 18h60v25c0 24-14 41-30 41S30 67 30 43z' : 'M33 16h54v27c0 22-12 38-27 38S33 65 33 43z';
+  const parts = [];
+  // defs
+  parts.push(`<defs>
+    <linearGradient id="${u}m" x1="0" y1="0" x2="1" y2="0" spreadMethod="reflect">${metal.map((c, i) => `<stop offset="${(i / (metal.length - 1)).toFixed(2)}" stop-color="${c}"/>`).join('')}${lvl === 4 && live ? '<animateTransform attributeName="gradientTransform" type="translate" values="0 0;1 0;0 0" dur="7s" repeatCount="indefinite"/>' : ''}</linearGradient>
+    <linearGradient id="${u}v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".38"/></linearGradient>
+    ${lvl >= 3 ? `<linearGradient id="${u}s" x1="0" y1="0" x2="1" y2="1"><stop offset=".38" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".75"/><stop offset=".62" stop-color="#fff" stop-opacity="0"/>${live ? `<animateTransform attributeName="gradientTransform" type="translate" values="-1.2 -1.2;1.2 1.2;1.2 1.2" keyTimes="0;.45;1" dur="${lvl === 4 ? 3.2 : 4.2}s" repeatCount="indefinite"/>` : ''}</linearGradient>` : ''}
+    ${lvl >= 3 ? `<radialGradient id="${u}g" cx="60" cy="46" r="60" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${TRO_GLOW[rr]}" stop-opacity=".55"/><stop offset="1" stop-color="${TRO_GLOW[rr]}" stop-opacity="0"/></radialGradient>` : ''}
+  </defs>`);
+  // background FX (halo + rays), only when unlocked
+  if (lvl >= 3 && live) {
+    parts.push(`<circle cx="60" cy="46" r="60" fill="url(#${u}g)"/>`);
+    const n = lvl === 4 ? 16 : 12;
+    const rays = Array.from({ length: n }, (_, i) => `<path d="M60 46L56.5 -12h7z" transform="rotate(${((i * 360) / n).toFixed(1)} 60 46)"/>`).join('');
+    parts.push(`<g class="tr-rays ${lvl === 4 ? 'spin' : ''}" fill="url(#${u}g)" opacity="${lvl === 4 ? '.9' : '.6'}">${rays}</g>`);
+  }
+  // laurels behind the cup
+  if (lvl === 3) parts.push(`<g opacity=".95">${troLaurel(60, 66, 46, 30, 120, 6, M)}</g>`);
+  if (lvl === 4) parts.push(troLaurel(60, 58, 54, 26, 205, 10, M));
+  // handles
+  if (lvl === 1) parts.push(`<path d="M34 23H24c0 14 5 23 13 25M86 23h10c0 14-5 23-13 25" stroke="${M}" stroke-width="5" stroke-linecap="round" fill="none"/>`);
+  else {
+    parts.push(`<path d="M31 23H18c-1 21 8 32 20 34M89 23h13c1 21-8 32-20 34" stroke="${M}" stroke-width="${lvl >= 3 ? 6.5 : 6}" stroke-linecap="round" fill="none"/>`);
+    parts.push(`<circle cx="18" cy="23" r="${lvl >= 3 ? 4.5 : 3.6}" fill="${M}"/><circle cx="102" cy="23" r="${lvl >= 3 ? 4.5 : 3.6}" fill="${M}"/>`);
+    if (lvl >= 3) parts.push(`<path d="M30 33h-6c0 9 4 15 9 17M90 33h6c0 9-4 15-9 17" stroke="${M}" stroke-width="2.4" stroke-linecap="round" fill="none" opacity=".9"/>`);
+  }
+  // finial on top
+  if (lvl === 3) parts.push(`<rect x="57.5" y="5" width="5" height="9" rx="1.5" fill="${M}"/><path d="M60-7l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L60 7.8l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z" fill="${M}" stroke="rgba(120,70,0,.55)" stroke-width=".8"/>`);
+  if (lvl === 4) parts.push(`<rect x="57.5" y="4" width="5" height="10" rx="1.5" fill="${M}"/><path d="M60-12l9 8-9 12-9-12z" fill="${M}" stroke="#fff" stroke-opacity=".8" stroke-width="1"/><path d="M51-4h18M60-12l-3 8 3 12 3-12z" stroke="#fff" stroke-opacity=".7" stroke-width=".8" fill="none"/>`);
+  // cup body + depth + rim
+  parts.push(`<path d="${cup}" fill="${M}"/><path d="${cup}" fill="url(#${u}v)"/>`);
+  if (lvl >= 2) parts.push(`<rect x="${lvl >= 3 ? 26 : 27}" y="13" width="${lvl >= 3 ? 68 : 66}" height="8" rx="4" fill="${M}"/><rect x="${lvl >= 3 ? 26 : 27}" y="13" width="${lvl >= 3 ? 68 : 66}" height="8" rx="4" fill="url(#${u}v)"/>`);
+  if (lvl >= 3) parts.push(`<path d="${cup}" fill="url(#${u}s)"/>`);
+  // shine stripe
+  parts.push(`<path d="${lvl === 1 ? 'M40 22c0 18 3 32 10 40' : 'M37 24c0 20 3 36 12 45'}" stroke="#fff" stroke-opacity="${lvl === 1 ? .3 : .55}" stroke-width="${lvl === 1 ? 2.5 : 3.5}" stroke-linecap="round" fill="none"/>`);
+  // emblem / engraved icon
+  if (lvl === 1) {
+    parts.push(secret ? '<text x="60" y="54" class="tr-q dark">?</text>' : `<g transform="translate(50 33) scale(.84)" fill="none" stroke="rgba(60,24,4,.8)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`);
+  } else {
+    const ey = lvl >= 3 ? 44 : 43;
+    parts.push(`<circle cx="60" cy="${ey}" r="14" fill="rgba(0,0,0,.32)" stroke="${M}" stroke-width="2.4"/>`);
+    if (lvl >= 3) parts.push(`<circle cx="60" cy="${ey}" r="17.5" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width=".8" stroke-dasharray="1.5 2.5"/>`);
+    parts.push(secret ? `<text x="60" y="${ey + 6}" class="tr-q">?</text>` : `<g transform="translate(51 ${ey - 9}) scale(.75)" fill="none" stroke="#fff" stroke-opacity=".95" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`);
+  }
+  // stem + base
+  if (lvl === 1) {
+    parts.push(`<path d="M54 80h12l-1.5 18h-9z" fill="${M}"/><rect x="38" y="97" width="44" height="8" rx="2.5" fill="${M}"/><rect x="33" y="104" width="54" height="16" rx="3" fill="${M}"/><rect x="33" y="104" width="54" height="16" rx="3" fill="url(#${u}v)"/>`);
+  } else {
+    parts.push(`<path d="M54 ${lvl >= 3 ? 85 : 83}h12l-2 14h-8z" fill="${M}"/><ellipse cx="60" cy="91" rx="${lvl >= 3 ? 9 : 7.5}" ry="3.2" fill="${M}"/>`);
+    parts.push(`<rect x="39" y="98" width="42" height="7" rx="2.5" fill="${M}"/><rect x="30" y="104" width="60" height="19" rx="3.5" fill="${M}"/><rect x="30" y="104" width="60" height="19" rx="3.5" fill="url(#${u}v)"/>`);
+    parts.push(`<rect x="42" y="109" width="36" height="8" rx="2" fill="rgba(0,0,0,.3)" stroke="#fff" stroke-opacity="${lvl >= 3 ? .4 : .25}" stroke-width=".8"/>`);
+    if (lvl === 4) parts.push(`<path d="M60 109.5l3.5 3.5-3.5 3.5-3.5-3.5z" fill="${M}" stroke="#fff" stroke-width=".7"/><circle cx="35.5" cy="113.5" r="2" fill="${M}"/><circle cx="84.5" cy="113.5" r="2" fill="${M}"/>`);
+    if (lvl === 3) parts.push(`<circle cx="50" cy="113" r="1.6" fill="${M}"/><circle cx="70" cy="113" r="1.6" fill="${M}"/>`);
+  }
+  // sparkles
+  if (lvl >= 2 && live) {
+    const sp = lvl === 2 ? [[96, 14, .55, 0]] : lvl === 3 ? [[20, 8, .8, 0], [102, 36, .65, 1.1], [97, 96, .55, 2]] : [[16, 4, .9, 0], [104, 18, .7, .7], [104, 70, .6, 1.4], [14, 64, .7, 2.1], [92, 100, .5, 1], [28, 98, .55, 1.8]];
+    parts.push(sp.map(([x, y, s, d]) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="${TRO_SPARK}" class="tr-spark" fill="#fff" style="animation-delay:${d}s"/></g>`).join(''));
+  }
+  return `<svg class="trophy ${rr} ${locked ? 'locked' : ''}" viewBox="0 -14 120 140" aria-hidden="true">${parts.join('')}</svg>`;
+}
+
+/** Secret trophies all share their own shape: a pearly white crystal floating
+ *  over a pedestal, circled by an orbit ring (whatever their rarity). */
+const troArt = (it) => (it.secret || it.kind === 'secret' ? 'secret' : it.rarity || rarityOfRank(it.tier));
+function secretTrophySvg(icon, locked = false, hidden = false) {
+  const u = `tr${++TRO_UID}`;
+  const live = !locked;
+  const inner = (ACH_ICONS[icon] || ACH_ICONS.secret).replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+  const g = (id, a, b, c) => `<linearGradient id="${u}${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset=".55" stop-color="${b}"/><stop offset="1" stop-color="${c}"/></linearGradient>`;
+  const orbit = 'M16 46a44 11 0 1 0 88 0a44 11 0 1 0-88 0';
+  return `<svg class="trophy secret ${locked ? 'locked' : ''}" viewBox="0 -14 120 140" aria-hidden="true">
+    <defs>
+      ${g('t', '#ffffff', '#f3ecff', '#dfe9ff')}${g('l', '#fbfcff', '#e4e8f8', '#c3c9e2')}${g('r', '#eef1fb', '#cfd5ea', '#a2a9c6')}${g('b', '#ffffff', '#dfe3f0', '#9ea6bf')}
+      <radialGradient id="${u}h" cx="60" cy="40" r="62" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+      <linearGradient id="${u}s" x1="0" y1="0" x2="1" y2="1"><stop offset=".4" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".9"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/>${live ? '<animateTransform attributeName="gradientTransform" type="translate" values="-1.2 -1.2;1.2 1.2;1.2 1.2" keyTimes="0;.45;1" dur="3.6s" repeatCount="indefinite"/>' : ''}</linearGradient>
+    </defs>
+    ${live ? `<circle cx="60" cy="40" r="62" fill="url(#${u}h)"/>` : ''}
+    <g transform="rotate(-14 60 46)"><path d="${orbit}" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1.4" stroke-dasharray="3 4"/></g>
+    <path d="M55 86h10l3 13H52z" fill="url(#${u}b)"/>
+    <rect x="34" y="98" width="52" height="8" rx="3" fill="url(#${u}b)"/>
+    <rect x="28" y="105" width="64" height="17" rx="4" fill="url(#${u}b)"/>
+    <rect x="43" y="110" width="34" height="7" rx="2" fill="rgba(40,44,70,.22)" stroke="#fff" stroke-opacity=".6" stroke-width=".8"/>
+    <path d="M60 111l2.6 2.6-2.6 2.6-2.6-2.6z" fill="#fff"/>
+    <g class="${live ? 'tr-float' : ''}">
+      <path d="M60-8L86 17 60 26 34 17z" fill="url(#${u}t)"/>
+      <path d="M34 17L60 26V88L34 58z" fill="url(#${u}l)"/>
+      <path d="M86 17L86 58 60 88V26z" fill="url(#${u}r)"/>
+      <path d="M60-8L86 17 86 58 60 88 34 58 34 17z" fill="url(#${u}s)"/>
+      <path d="M60-8L86 17 86 58 60 88 34 58 34 17zM34 17L60 26 86 17M60 26V88" fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="1.1" stroke-linejoin="round"/>
+      <path d="M40 22l2 30" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-opacity=".9"/>
+      ${hidden ? '<text x="60" y="56" class="tr-q dark secret-q">?</text>' : `<g transform="translate(50.5 36) scale(.8)" fill="none" stroke="rgba(52,56,92,.82)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`}
+    </g>
+    <g transform="rotate(-14 60 46)"><path d="M16 46a44 11 0 0 0 88 0" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.6"/>
+      ${live ? `<circle r="2.6" fill="#fff"><animateMotion dur="5s" repeatCount="indefinite" path="${orbit}"/></circle><circle r="1.6" fill="#fff" opacity=".8"><animateMotion dur="5s" begin="-2.5s" repeatCount="indefinite" path="${orbit}"/></circle>` : ''}</g>
+    ${live ? [[18, 2, .8, 0], [102, 12, .6, 1], [100, 88, .55, 1.9], [20, 80, .6, 1.4]].map(([x, y, s, d]) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="${TRO_SPARK}" class="tr-spark" fill="#fff" style="animation-delay:${d}s"/></g>`).join('') : ''}
+  </svg>`;
+}
+
+function trophyCard(it) {
+  const got = it.tier >= 1;
+  const t = it.tiers[0];
+  const pct = got ? 100 : Math.max(0, Math.min(100, (it.value / Math.max(1, t.goal)) * 100));
+  const near = !got && !it.hidden && pct >= 60;
+  return `<div class="tro ${it.rarity} ${it.secret ? 'secret' : ''} ${got ? 'got' : 'locked'} ${it.hidden ? 'hidden' : ''} ${near ? 'near' : ''}" title="${esc(t.desc)}">
+    <div class="tro-glow"></div>
+    <span class="tro-pts">+${t.points}</span>
+    ${got ? '<span class="tro-check">✓</span>' : `<span class="tro-lock">${CROWN_LOCK}</span>`}
+    ${near ? '<span class="tro-flag">Presque !</span>' : ''}
+    <div class="tro-art">${trophySvg(troArt(it), it.icon, !got, it.hidden)}</div>
+    <div class="tro-info">
+      <span class="tro-rar ${it.secret ? 'secret' : it.rarity}">${it.secret ? 'Secret · ' : ''}${esc(RARITY[it.rarity].name)}</span>
+      <b class="tro-name">${esc(it.name)}</b>
+      <span class="tro-desc">${esc(t.desc)}</span>
+      ${got ? `<span class="tro-date">Obtenu le ${new Date(t.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</span>`
+        : it.hidden ? '<span class="tro-date">Indice : explore Linkgeek…</span>'
+          : `<div class="tro-prog"><div class="a-bar"><i class="${it.rarity}" style="width:${pct.toFixed(1)}%"></i></div><span>${fmtAch(it.value, it.unit)} / ${fmtAch(t.goal, it.unit)}</span></div>`}
+    </div>
+  </div>`;
+}
+
+function nearCard(it) {
+  const t = it.tiers[0];
+  const pct = Math.max(0, Math.min(100, (it.value / Math.max(1, t.goal)) * 100));
+  return `<div class="tro-near ${it.rarity}">
+    <div class="tro-near-art">${trophySvg(it.rarity, it.icon)}</div>
+    <div class="tro-near-body">
+      <small>${esc(RARITY[it.rarity].name)} · +${t.points} pts</small>
+      <b>${esc(it.name)}</b>
+      <span>${esc(t.desc)}</span>
+      <div class="tro-prog"><div class="a-bar"><i class="${it.rarity}" style="width:${pct.toFixed(1)}%"></i></div><span>${Math.floor(pct)} %</span></div>
+      <em>Plus que ${fmtAch(Math.max(0, t.goal - it.value), it.unit)} !</em>
     </div>
   </div>`;
 }
@@ -1697,43 +2714,52 @@ function viewAchievements() {
   const a = state.ach;
   const head = (sub) => `<div class="page-head"><div><h1>Succès</h1><div class="sub">${sub}</div></div></div>`;
   if (!a) return `<div class="page">${head('Chargement…')}</div>`;
-  const filters = [['all', 'Tous'], ['progress', 'En cours'], ['done', 'Terminés'], ['locked', 'Verrouillés']];
-  const max = (it) => it.tiers.length;
-  const items = a.items.filter((it) => !it.kind).filter((it) => state.achFilter === 'all' || (state.achFilter === 'done' ? it.tier >= max(it) : state.achFilter === 'locked' ? it.tier === 0 : it.tier > 0 && it.tier < max(it)))
-    .sort((x, y) => (state.achFilter === 'all' ? 0 : y.tier - x.tier));
-  const secrets = a.items.filter((it) => it.kind === 'secret');
-  const ult = a.items.find((it) => it.kind === 'ultimate');
-  const maxed = a.items.filter((it) => it.kind !== 'ultimate' && it.tier >= max(it)).length;
-  const others = a.items.filter((it) => it.kind !== 'ultimate').length;
+  const items = a.items;
+  const f = ['all', 'got', 'todo'].includes(state.achFilter) ? state.achFilter : 'all';
+  const shown = (it) => f === 'all' || (f === 'got' ? it.tier >= 1 : it.tier < 1);
   const pct = Math.round((a.points / a.maxPoints) * 100);
+  const rankIdx = COLLECTOR_RANKS.reduce((r, [min], i) => (pct >= min ? i : r), 0);
+  const nextRank = COLLECTOR_RANKS[rankIdx + 1];
+  const ptsToNext = nextRank ? Math.max(0, Math.ceil((nextRank[0] / 100) * a.maxPoints) - a.points) : 0;
+  const pctOfIt = (it) => (it.value / Math.max(1, it.tiers[0].goal)) * 100;
+  const near = items.filter((it) => it.tier < 1 && !it.hidden && it.kind !== 'ultimate').sort((x, y) => pctOfIt(y) - pctOfIt(x)).slice(0, 3);
+  const latest = items.filter((it) => it.tier >= 1 && it.tiers[0].at).sort((x, y) => y.tiers[0].at - x.tiers[0].at).slice(0, 6);
+  const br = a.byRarity || {};
+  const C = 2 * Math.PI * 54;
   return `<div class="page">
-    ${head(`${a.unlocked} / ${a.total} paliers débloqués`)}
-    <div class="panel a-summary">
-      <div class="a-level">${I.trophy}</div>
-      <div class="a-score">
-        <div class="a-score-top"><b>${a.points.toLocaleString('fr-FR')}</b><span>/ ${a.maxPoints.toLocaleString('fr-FR')} points de succès · ${pct} %</span></div>
-        <div class="a-bar big"><i style="width:${pct}%"></i></div>
-        <div class="a-legend">Bronze 10 pts · Argent 25 pts · Or 50 pts · Platine 100 pts</div>
+    ${head(`${a.unlocked} / ${a.total} trophées · plus la rareté est haute, plus le défi est difficile`)}
+    <div class="ach2-hero">
+      <div class="ach2-ring">
+        <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" class="bg"/><circle cx="60" cy="60" r="54" class="fg" stroke-dasharray="${(C * pct / 100).toFixed(1)} ${C.toFixed(1)}"/></svg>
+        <div><b>${pct}<small>%</small></b><span>complété</span></div>
       </div>
-      <div class="a-counts">${['bronze', 'silver', 'gold', 'platinum'].map((c, i) => `
-        <div class="a-count"><div class="a-medal sm ${c}">${I.trophy}</div><b>${a.counts[i]}</b><span>${['Bronze', 'Argent', 'Or', 'Platine'][i]}</span></div>`).join('')}</div>
+      <div class="ach2-hero-main">
+        <small>Rang de chasseur de trophées</small>
+        <h2>${esc(COLLECTOR_RANKS[rankIdx][1])}</h2>
+        <p>${nextRank ? `Encore <b>${ptsToNext.toLocaleString('fr-FR')} pts</b> pour devenir <b>${esc(nextRank[1])}</b>` : 'Tu as atteint le rang le plus haut 👑'}</p>
+        <div class="ach2-score"><b>${a.points.toLocaleString('fr-FR')}</b> / ${a.maxPoints.toLocaleString('fr-FR')} points</div>
+        <div class="ach2-ranks">${COLLECTOR_RANKS.map(([min, n], i) => `<span class="${i < rankIdx ? 'past' : i === rankIdx ? 'cur' : ''}" title="${min} %">${esc(n)}</span>`).join('')}</div>
+      </div>
+      <div class="tro-counts">${['bronze', 'silver', 'gold', 'platinum'].map((r) => `<div class="tro-count ${r}">${trophySvg(r, 'trophy', !(br[r] && br[r].got))}<b>${br[r] ? br[r].got : 0}<small>/${br[r] ? br[r].total : 0}</small></b><span>${RARITY[r].name}</span><em>${RARITY[r].pts} pts</em></div>`).join('')}</div>
     </div>
-    ${ult ? `<div class="panel a-ultimate ${ult.tier ? 'got' : ''}">
-      <div class="a-medal ultimate ${ult.tier ? '' : 'locked'}">${ACH_ICONS.gem}</div>
-      <div class="a-ult-body">
-        <small>Le trophée ultime</small>
-        <b>${esc(ult.name)}</b>
-        <span>${ult.tier ? `Débloqué le ${new Date(ult.tiers[0].at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} : le badge Ultime brille sur ton profil.` : 'Débloque tous les autres trophées au rang maximum, secrets compris. Récompense : un badge spécial sur ton profil.'}</span>
-        <div class="a-prog"><div class="a-bar"><i class="ultimate" style="width:${Math.round((maxed / others) * 100)}%"></i></div><span>${maxed} / ${others} trophées au rang maximum</span></div>
-      </div>
-      <span class="a-ult-pts">${ult.tiers[0].points} pts</span>
-    </div>` : ''}
-    <div class="a-filters">${filters.map(([k, l]) => `<button class="${state.achFilter === k ? 'active' : ''}" data-ach-filter="${k}">${l}</button>`).join('')}</div>
-    ${items.length ? `<div class="a-grid">${items.map(achCard).join('')}</div>` : '<div class="empty"><b>Rien ici pour l\'instant</b>Continue de jouer !</div>'}
-    ${secrets.length ? `<section class="section">
-      <div class="section-head"><div><h2>Trophées secrets</h2><div class="sub">${a.secrets.found} / ${a.secrets.total} découverts · ils se révèlent quand tu les débloques</div></div></div>
-      <div class="a-grid">${secrets.map(specialCard).join('')}</div>
+    ${near.length ? `<section class="section">
+      <div class="section-head"><div><h2>🔥 Presque débloqués</h2><div class="sub">Tes trophées les plus proches : fonce !</div></div></div>
+      <div class="ach2-nears">${near.map(nearCard).join('')}</div>
     </section>` : ''}
+    ${latest.length ? `<section class="section">
+      <div class="section-head"><div><h2>Derniers débloqués</h2></div></div>
+      <div class="ach2-latest">${latest.map((it) => `<div class="ach2-lt"><div class="tro-mini">${trophySvg(troArt(it), it.icon)}</div><div><b>${esc(it.name)}</b><span>${esc(RARITY[it.rarity].name)} · ${esc(fmtAgo(it.tiers[0].at))}</span></div></div>`).join('')}</div>
+    </section>` : ''}
+    <div class="a-filters tro-filters">${[['all', 'Tous', items.length], ['got', 'Débloqués', a.unlocked], ['todo', 'À débloquer', a.total - a.unlocked]].map(([k, l, c]) => `<button class="${f === k ? 'active' : ''}" data-ach-filter="${k}">${l}<span class="n">${c}</span></button>`).join('')}</div>
+    ${RARITY_ORDER.map((r) => {
+      const list = items.filter((it) => it.rarity === r && shown(it))
+        .sort((x, y) => (y.tier - x.tier) || (pctOfIt(y) - pctOfIt(x)));
+      if (!list.length) return '';
+      return `<section class="section tro-sec ${r}">
+        <div class="tro-head ${r}"><div class="tro-head-ic">${trophySvg(r, 'trophy')}</div><div><h2>${esc(RARITY[r].name)}</h2><span>${esc(RARITY[r].sub)} · ${RARITY[r].pts} pts chacun</span></div><i>${br[r] ? br[r].got : 0} / ${br[r] ? br[r].total : 0}</i></div>
+        <div class="tro-grid ${r === 'platinum' ? 'solo' : ''}">${list.map(trophyCard).join('')}</div>
+      </section>`;
+    }).join('')}
     ${a.playedWith.length ? `<section class="section"><div class="section-head"><h2>Tes coéquipiers</h2></div>
       <div class="a-mates">${a.playedWith.map((m) => `<div class="a-mate panel">${friendAvatar({ name: m.name, state: 'offline' })}<div class="f-info"><b>${esc(m.name)}</b><span class="f-status">${esc(m.game)} · ${esc(fmtAgo(m.at))}</span></div></div>`).join('')}</div></section>` : ''}
   </div>`;
@@ -1749,9 +2775,10 @@ async function loadAchievements() {
 function achToast(list) {
   for (const u of list.slice(-3)) {
     const t = document.createElement('div');
-    t.className = `toast ach ${u.kind || TIER_CLS[u.tier]}`;
-    const label = u.kind === 'secret' ? 'Trophée secret découvert !' : u.kind === 'ultimate' ? 'TROPHÉE ULTIME DÉBLOQUÉ !' : `Succès ${esc(u.tierName)} débloqué`;
-    t.innerHTML = `<span class="a-emoji">${u.kind === 'secret' ? '🕵️' : u.kind === 'ultimate' ? '👑' : TIER_EMOJI[u.tier]}</span><div><small>${label}</small><b>${esc(u.name)}</b><span>${esc(u.desc)}</span></div>`;
+    const rar = u.rarity || TIER_CLS[u.tier] || 'bronze';
+    t.className = `toast ach ${rar}${u.secret ? ' secret' : ''}`;
+    const label = u.kind === 'ultimate' ? 'TROPHÉE PLATINE DÉBLOQUÉ !' : u.secret ? 'Trophée secret découvert !' : `Trophée ${esc(u.tierName)} débloqué`;
+    t.innerHTML = `<span class="toast-trophy">${trophySvg(u.secret ? 'secret' : rar, u.icon || 'trophy')}</span><div><small>${label}</small><b>${esc(u.name)}</b><span>${esc(u.desc)}</span></div>`;
     t.addEventListener('click', () => go('achievements'));
     $('#toasts').appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .4s'; }, 5600);
@@ -1780,8 +2807,9 @@ const GOOGLE_G = '<svg class="g-logo" viewBox="0 0 48 48"><path fill="#FFC107" d
 
 function themePreview(t) {
   const c = t.c;
-  return `<div class="tp" style="background:${c.bg}">
+  return `<div class="tp ${t.rarity ? `tp-${t.rarity} tp-fx-${esc(t.id)}` : ''}" style="background:${c.bg}">
     <div class="tp-glow" style="background:${c.glow}"></div>
+    ${t.rarity === 'epic' || t.id === 'aurora' ? '<div class="tp-fx"></div>' : ''}
     <div class="tp-side" style="background:${c.side}">
       <i style="background:${c.accent}"></i><i style="background:${c.muted};opacity:.5"></i><i style="background:${c.muted};opacity:.5"></i>
     </div>
@@ -1818,6 +2846,20 @@ function firebaseDetails(s) {
   </details>`;
 }
 
+/** Normal players with the config bundled in the installer only see a status line, no setup fields. */
+function onlineConfigHidden(s) {
+  return !(s.admin && s.admin.isAdmin) && (s.google.source === 'file' || (s.firebase && s.firebase.source === 'file'));
+}
+function onlineStatusLine(s) {
+  const ok = s.google.configured && s.firebase && s.firebase.configured;
+  return `<div class="set-list online-status"><div class="set-row"><div><b>Mode en ligne</b><span>${ok ? 'Connecté au serveur Linkgeek' : 'Non disponible pour le moment. Réinstalle Linkgeek ou préviens la personne qui te l\'a envoyé.'}</span></div>
+    <span class="chip ${ok ? 'live' : 'warn'}">${ok ? '✓ Disponible' : 'Non disponible'}</span></div></div>`;
+}
+/** Admin: the whole setup stays available, folded under "Options avancées". */
+function advancedBlock(inner) {
+  return `<details class="dev adv"><summary>Options avancées <span class="todo">admin</span></summary><div class="adv-body">${inner}</div></details>`;
+}
+
 function settingsSection(s) {
   const tab = state.settingsTab;
   if (tab === 'appearance') {
@@ -1849,9 +2891,10 @@ function settingsSection(s) {
           <button class="ghost danger" data-acc="delete-online">${I.trash}Supprimer</button>
         </div>` : ''}
         <p class="set-note"><a href="https://github.com/unknownxsr/linkgeek/blob/main/CONFIDENTIALITE.md" target="_blank">Politique de confidentialité</a></p>
-        ${firebaseDetails(s)}`;
+        ${onlineConfigHidden(s) ? onlineStatusLine(s) : s.admin && s.admin.isAdmin ? advancedBlock(firebaseDetails(s)) : firebaseDetails(s)}`;
     }
     const ready = s.google.configured;
+    const hidden = onlineConfigHidden(s);
     return `<h2>Créer mon compte</h2><p class="set-desc">Crée ton compte Linkgeek en un clic avec Google : ton nom et ta photo sont repris automatiquement.</p>
       <div class="acc-hero">
         <div class="acc-hero-txt">
@@ -1862,7 +2905,7 @@ function settingsSection(s) {
           ? `<div class="acc-wait"><span class="spinner"></span><div><b>Termine la connexion dans ton navigateur…</b><span>Choisis ton compte Google puis reviens ici.</span></div><button class="ghost" data-acc="cancel">Annuler</button></div>`
           : `<button class="btn-google" data-acc="signin" ${ready ? '' : 'disabled'}>${GOOGLE_G}Continuer avec Google</button>`}
       </div>
-      ${ready ? '' : '<p class="set-warn">Pour activer la connexion Google, Linkgeek a besoin d\'un identifiant client OAuth (gratuit). Suis les étapes ci-dessous, une seule fois.</p>'}
+      ${hidden ? onlineStatusLine(s) : `${ready ? '' : '<p class="set-warn">Pour activer la connexion Google, Linkgeek a besoin d\'un identifiant client OAuth (gratuit). Suis les étapes ci-dessous, une seule fois.</p>'}
       <details class="dev" ${ready ? '' : 'open'}>
         <summary>Configuration Google ${ready ? `<span class="ok">✓ configurée${s.google.source === 'file' ? ' (fichier google-oauth.json)' : ''}</span>` : ''}</summary>
         <ol class="steps">
@@ -1879,13 +2922,14 @@ function settingsSection(s) {
         </div>
         <div class="set-actions"><button class="ghost primary-soft" data-acc="save">Enregistrer</button>${s.google.source === 'settings' ? '<button class="ghost danger" data-acc="clear">Effacer</button>' : ''}</div>
       </details>
-      ${firebaseDetails(s)}`;
+      ${firebaseDetails(s)}`}`;
   }
   if (tab === 'general') {
     return `<h2>Général</h2><p class="set-desc">Comportement de Linkgeek sur ton PC.</p>
       <div class="set-list">
         ${toggle('startup', s.startup, 'Lancer Linkgeek au démarrage de Windows', 'Démarre discrètement dans la zone de notification pour suivre ton temps de jeu en continu.')}
         ${toggle('closeToTray', s.closeToTray, 'Réduire dans la zone de notification à la fermeture', 'La croix cache la fenêtre au lieu de quitter. Désactivé : fermer quitte Linkgeek (le suivi s\'arrête).')}
+        ${toggle('weeklyBoard', s.weeklyBoard, 'Apparaître dans le classement général', 'Ton pseudo, ta photo, ton niveau et tes heures de jeu de la semaine sont visibles par tous les joueurs de Linkgeek sur l\'accueil.')}
         ${toggle('notifyFriends', s.notifyFriends, 'Prévenir quand un ami lance un jeu', '« Mirko vient de lancer Rocket League » : dans l\'app, ou en notification Windows si Linkgeek est en arrière-plan.')}
         <div class="set-row"><div><b>Langue</b><span>Langue de l'interface de Linkgeek.</span></div>
           <div class="segmented sm">${[['fr', 'Français'], ['en', 'English']].map(([k, l]) => `<button class="${s.language === k ? 'active' : ''}" data-setting="language" data-value="${k}">${l}</button>`).join('')}</div></div>
@@ -1909,6 +2953,7 @@ function settingsSection(s) {
       </div>`;
   }
   if (tab === 'admin' && s.admin && s.admin.isAdmin) return adminSection(s);
+  if (tab === 'dashboard' && s.admin && s.admin.isAdmin) return dashboardSection(s);
   return `<h2>À propos</h2>
     <div class="about">
       <img src="../assets/icon.png" alt="">
@@ -1969,6 +3014,83 @@ function adminSection(s) {
     <div class="set-list"><div class="set-row"><div><b>Règles Firebase avec ton compte admin</b><span>À recopier dans Firebase → Realtime Database → Règles, puis Publier. Sans elles, le serveur refuse tes actions d'admin.</span></div><button class="ghost" data-acc="fb-rules">📋 Copier les règles</button></div></div>`;
 }
 
+/* ---- Admin: dashboard (global numbers, refreshed every 30 s while open) ---- */
+const DASH_ICON = '<svg viewBox="0 0 24 24"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 7h6V4h-6z"/></svg>';
+const nf = (n) => Number(n || 0).toLocaleString('fr-FR');
+
+async function loadDash() {
+  if (state.dashLoading) return;
+  state.dashLoading = true;
+  try { state.dash = await api.adminStats(); state.dashError = null; } catch (e) { state.dashError = errMsg(e); }
+  state.dashLoading = false;
+  if (state.view === 'settings' && state.settingsTab === 'dashboard') render(true);
+}
+setInterval(() => {
+  if (state.view === 'settings' && state.settingsTab === 'dashboard' && !document.hidden) loadDash();
+}, 30000);
+
+function dashSpark(hist) {
+  if (!hist || hist.length < 2) return '<p class="set-note">La courbe se remplit au fil du temps quand Linkgeek est ouvert sur ton PC (un relevé toutes les 5 minutes).</p>';
+  const W = 600, Hh = 90, t0 = hist[0].at, t1 = hist[hist.length - 1].at || t0 + 1;
+  const max = Math.max(1, ...hist.map((h) => h.n));
+  const pts = hist.map((h) => `${((h.at - t0) / Math.max(1, t1 - t0) * W).toFixed(1)},${(Hh - 6 - h.n / max * (Hh - 16)).toFixed(1)}`);
+  return `<svg class="dash-spark" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">
+    <polygon points="0,${Hh} ${pts.join(' ')} ${W},${Hh}" class="area"/><polyline points="${pts.join(' ')}" class="line"/></svg>
+    <div class="dash-axis"><span>${new Date(t0).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span><span>max ${max}</span><span>${new Date(t1).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span></div>`;
+}
+function dashBars(list, empty, label = (x) => esc(x.name)) {
+  if (!list || !list.length) return `<p class="set-note">${empty}</p>`;
+  const max = Math.max(...list.map((x) => x.n));
+  return `<div class="dash-bars">${list.map((x) => `<div class="dash-bar"><span class="l">${label(x)}</span><span class="b"><i style="width:${Math.max(4, x.n / max * 100)}%"></i></span><b>${nf(x.n)}</b></div>`).join('')}</div>`;
+}
+
+function dashboardSection(s) {
+  const d = state.dash;
+  if (!s.admin.online) return `<h2>Tableau de bord</h2><p class="set-warn">Connecte-toi au mode en ligne (onglet Compte) pour voir les chiffres de Linkgeek.</p>`;
+  if (!d && !state.dashError) { loadDash(); return '<h2>Tableau de bord</h2><div class="skeleton" style="height:320px"></div>'; }
+  if (!d) return `<h2>Tableau de bord</h2><p class="set-warn">${esc(state.dashError)}</p><div class="set-actions"><button class="ghost" data-adm="dash-refresh">Réessayer</button></div>`;
+  const tile = (v, l, sub = '', cls = '') => `<div class="dash-tile ${cls}"><b>${v}</b><span>${l}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const titleName = (x) => { const t = ((state.shop && state.shop.titles) || []).find((y) => y.key === x.name); return esc(t ? t.name : x.name); };
+  return `<div class="dash-head"><div><h2>Tableau de bord</h2><p class="set-desc">Chiffres globaux de Linkgeek, visibles seulement par toi. Mis à jour toutes les 30 secondes.</p></div>
+      <button class="ghost" data-adm="dash-refresh" ${state.dashLoading ? 'disabled' : ''}>${state.dashLoading ? 'Actualisation…' : 'Actualiser'}</button></div>
+    ${state.dashError ? `<p class="set-warn">${esc(state.dashError)}</p>` : ''}
+    <div class="dash-tiles">
+      ${tile(`<i class="f-dot online"></i>${nf(d.online.now)}`, 'En ligne maintenant', `${nf(d.online.active)} actifs · ${nf(d.online.away)} absents`, 'live')}
+      ${tile(nf(d.online.inGame), 'En jeu', 'lancé via Linkgeek')}
+      ${tile(nf(d.online.peakToday), 'Pic du jour', 'relevé sur ce PC')}
+      ${tile(nf(d.players.members), 'Joueurs inscrits', `+${nf(d.players.new7)} cette semaine · +${nf(d.players.new30)} en 30 jours`)}
+    </div>
+    <h3 class="set-h3">En ligne ces dernières 24 h</h3>
+    <div class="dash-card">${dashSpark(d.online.history)}</div>
+    <h3 class="set-h3">Activité</h3>
+    <div class="dash-tiles">
+      ${tile(nf(d.activity.active24), 'Actifs sur 24 h')}
+      ${tile(nf(d.activity.active7), 'Actifs sur 7 jours')}
+      ${tile(nf(d.activity.active30), 'Actifs sur 30 jours')}
+      ${tile(d.players.profiles ? Math.round(d.activity.active7 / d.players.profiles * 100) + ' %' : '—', 'Joueurs revenus cette semaine')}
+    </div>
+    <div class="dash-cols">
+      <div><h3 class="set-h3">Joués en ce moment</h3>${dashBars(d.playingNow, 'Personne ne joue via Linkgeek pour l\'instant.')}</div>
+      <div><h3 class="set-h3">Jeux préférés des joueurs</h3>${dashBars(d.favorites, 'Pas encore de données.')}</div>
+    </div>
+    <h3 class="set-h3">Temps de jeu</h3>
+    <div class="dash-tiles">
+      ${tile(nf(d.play.totalHours) + ' h', 'Au total', 'tous joueurs confondus')}
+      ${tile(nf(d.play.weekHours) + ' h', 'Cette semaine')}
+      ${tile(nf(d.play.avgGames), 'Jeux par joueur', 'en moyenne')}
+      ${tile(nf(d.play.ultimate), 'Trophée ultime', 'joueurs l\'ayant obtenu')}
+    </div>
+    <div class="dash-cols">
+      <div><h3 class="set-h3">Niveaux</h3>
+        <div class="dash-mini"><span>Moyenne <b>${String(d.players.avgLevel).replace('.', ',')}</b></span><span>Maximum <b>${nf(d.players.maxLevel)}</b></span><span>Fondateurs <b>${nf(d.players.founders)}</b>/100</span></div>
+        ${dashBars(d.players.byRank.filter((r) => r.n).reverse(), 'Aucun joueur.', (r) => `${levelBadge(r.min, 'xs', r)}${esc(r.name)}`)}</div>
+      <div><h3 class="set-h3">Communauté</h3>
+        <div class="dash-mini"><span>Amitiés <b>${nf(d.friends.pairs)}</b></span><span>Amis par joueur <b>${String(d.friends.avg).replace('.', ',')}</b></span><span>Sans ami <b>${nf(d.friends.lonely)}</b></span><span>Réseaux reliés <b>${nf(d.play.socials)}</b></span></div>
+        <h3 class="set-h3 sm">Titres équipés</h3>${dashBars(d.titles, 'Aucun titre équipé.', titleName)}</div>
+    </div>
+    <p class="set-note">Dernière mise à jour : ${new Date(d.at).toLocaleTimeString('fr-FR')}. Seuls des totaux sont affichés : aucun nom ni adresse de joueur. « En ligne » compte les joueurs dont Linkgeek a donné signe de vie depuis moins de 3 minutes.</p>`;
+}
+
 /* ---- Admin: trophy pickers ---- */
 function achOptions() {
   const c = state.achCatalog;
@@ -1998,7 +3120,8 @@ document.addEventListener('change', (e) => {
 
 async function adminClick(t) {
   const a = t.dataset.adm;
-  const num = (sel) => { const v = Number($(sel).value); return Number.isFinite(v) ? v : NaN; };
+  if (a === 'dash-refresh') { state.dashError = null; await loadDash(); return; }
+  const num =(sel) => { const v = Number($(sel).value); return Number.isFinite(v) ? v : NaN; };
   const done = async (r, msg) => { if (r && r.profile) state.profile = r.profile; if (r && r.challenges) { state.chal = r.challenges; setRanks(r.challenges.ranks); } state.settings = await api.getSettings(); toast(msg); render(true); };
   t.disabled = true;
   try {
@@ -2046,8 +3169,8 @@ async function adminClick(t) {
 function viewSettings() {
   const s = state.settings;
   if (!s) return '<div class="page"><div class="skeleton" style="height:400px"></div></div>';
-  const tabs = s.admin && s.admin.isAdmin ? [...SETTINGS_TABS, ['admin', 'Admin', CROWN]] : SETTINGS_TABS;
-  if (state.settingsTab === 'admin' && !(s.admin && s.admin.isAdmin)) state.settingsTab = 'appearance';
+  const tabs = s.admin && s.admin.isAdmin ? [...SETTINGS_TABS, ['dashboard', 'Tableau de bord', DASH_ICON], ['admin', 'Admin', CROWN]] : SETTINGS_TABS;
+  if ((state.settingsTab === 'admin' || state.settingsTab === 'dashboard') && !(s.admin && s.admin.isAdmin)) state.settingsTab = 'appearance';
   return `<div class="page">
     <div class="page-head"><div><h1>Paramètres</h1><div class="sub">Personnalise Linkgeek à ton goût</div></div></div>
     <div class="settings">
@@ -2061,6 +3184,81 @@ function applyTheme(theme) {
   if (theme === 'classic') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
   try { localStorage.setItem('nexus-theme', theme); } catch { /* ignore */ }
+  themeFx(theme);
+}
+
+/* ---- Epic theme effects drawn on a canvas behind the app ----
+ * Matrix: falling code. Galaxy: twinkling stars drifting + shooting stars.
+ * Capped at ~30 fps, paused while Linkgeek is hidden, off with "reduce motion". */
+const FX = { kind: null, canvas: null, raf: 0, last: 0, w: 0, h: 0, dpr: 1, data: null };
+function themeFx(theme) {
+  const kind = theme === 'matrix' || theme === 'galaxy' ? theme : null;
+  if (FX.kind === kind) return;
+  cancelAnimationFrame(FX.raf);
+  if (FX.canvas) { FX.canvas.remove(); FX.canvas = null; }
+  FX.kind = kind;
+  if (!kind || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const c = document.createElement('canvas');
+  c.id = 'theme-fx';
+  document.body.prepend(c);
+  FX.canvas = c;
+  fxResize();
+  FX.raf = requestAnimationFrame(fxFrame);
+}
+function fxResize() {
+  const c = FX.canvas;
+  if (!c) return;
+  FX.dpr = Math.min(window.devicePixelRatio || 1, 2);
+  FX.w = innerWidth; FX.h = innerHeight;
+  c.width = FX.w * FX.dpr; c.height = FX.h * FX.dpr;
+  const ctx = c.getContext('2d');
+  ctx.setTransform(FX.dpr, 0, 0, FX.dpr, 0, 0);
+  if (FX.kind === 'matrix') {
+    const size = 16;
+    FX.data = { size, drops: Array.from({ length: Math.ceil(FX.w / size) }, () => Math.random() * -FX.h / size), chars: 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789'.split('') };
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, FX.w, FX.h);
+  } else {
+    const n = Math.round((FX.w * FX.h) / 5200);
+    FX.data = { stars: Array.from({ length: n }, () => ({ x: Math.random() * FX.w, y: Math.random() * FX.h, r: Math.random() * 1.3 + 0.2, s: Math.random() * 0.12 + 0.02, p: Math.random() * Math.PI * 2, hue: [270, 320, 200, 0][Math.floor(Math.random() * 4)] })), shoot: null, nextShoot: performance.now() + 3000 };
+  }
+}
+window.addEventListener('resize', () => { if (FX.canvas) fxResize(); });
+function fxFrame(t) {
+  FX.raf = requestAnimationFrame(fxFrame);
+  if (document.hidden || t - FX.last < (FX.kind === 'matrix' ? 50 : 33)) return;
+  FX.last = t;
+  const ctx = FX.canvas.getContext('2d');
+  const d = FX.data;
+  if (FX.kind === 'matrix') {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+    ctx.fillRect(0, 0, FX.w, FX.h);
+    ctx.font = `${d.size}px Consolas, monospace`;
+    d.drops.forEach((y, i) => {
+      const ch = d.chars[(Math.random() * d.chars.length) | 0];
+      const x = i * d.size; const py = y * d.size;
+      ctx.fillStyle = Math.random() > 0.975 ? '#d6ffe4' : 'rgba(0, 255, 102, 0.55)';
+      ctx.fillText(ch, x, py);
+      d.drops[i] = py > FX.h && Math.random() > 0.975 ? 0 : y + 1;
+    });
+  } else {
+    ctx.clearRect(0, 0, FX.w, FX.h);
+    for (const s of d.stars) {
+      s.x -= s.s; if (s.x < -2) { s.x = FX.w + 2; s.y = Math.random() * FX.h; }
+      const a = 0.45 + 0.55 * Math.abs(Math.sin(t / 1400 + s.p));
+      ctx.fillStyle = s.hue ? `hsla(${s.hue}, 90%, 85%, ${a})` : `rgba(255, 255, 255, ${a})`;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    }
+    if (!d.shoot && t > d.nextShoot) d.shoot = { x: Math.random() * FX.w * 0.7 + FX.w * 0.3, y: Math.random() * FX.h * 0.4, life: 0 };
+    if (d.shoot) {
+      const sh = d.shoot; sh.life += 1;
+      const x = sh.x - sh.life * 14; const y = sh.y + sh.life * 6;
+      const g = ctx.createLinearGradient(x, y, x + 120, y - 52);
+      g.addColorStop(0, 'rgba(255, 255, 255, 0.9)'); g.addColorStop(1, 'rgba(192, 132, 252, 0)');
+      ctx.strokeStyle = g; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 120, y - 52); ctx.stroke();
+      if (sh.life > 40) { d.shoot = null; d.nextShoot = t + 5000 + Math.random() * 7000; }
+    }
+  }
 }
 
 async function loadSettings() {
@@ -2160,6 +3358,7 @@ async function settingsClick(t) {
     }
     if (d.setting) {
       state.settings = await api.setSettings({ [d.setting]: !state.settings[d.setting] });
+      if (d.setting === 'weeklyBoard') { state.weekly = null; state.weeklyAt = 0; }
       return render(true);
     }
     if (d.lib === 'rescan') return $('#btn-rescan').click();
@@ -2237,7 +3436,7 @@ function go(view, gameId = null) {
   if (view === 'achievements') loadAchievements();
   if (view === 'shop') loadShop();
   if (view === 'game' && gameId) { state.newsOpen = null; loadNews(gameId); }
-  if (view === 'home') { loadRecentNews(); loadReco(); }
+  if (view === 'home') { loadRecentNews(); loadReco(); if (!state.ach) loadAchievements(); if (!state.shop) loadShop(); if (!state.weeklyAt || Date.now() - state.weeklyAt > 60000) loadWeekly(); }
   if (view === 'challenges' || view === 'profile') loadChallenges();
   if (view === 'friends') loadMyCard();
   api.noteVisit(view).catch(() => {}); // secret trophy "Curieux"
@@ -2300,6 +3499,26 @@ document.addEventListener('click', async (e) => {
   const ct = e.target.closest('[data-col],[data-col-new],[data-col-rename],[data-col-del],[data-col-toggle]');
   if (ct && !ct.closest('#modal-root')) return collectionsClick(ct);
   if (e.target.closest('[data-reco-refresh]')) { if (!state.recoLoading) loadReco(true); return; }
+  if (e.target.closest('[data-board-refresh]')) { loadWeekly(); return; }
+  if (e.target.closest('[data-cmp-friends]')) {
+    state.cmpFriends = !state.cmpFriends;
+    try { localStorage.setItem('linkgeek-cmp-friends', state.cmpFriends ? '1' : '0'); } catch { /* ignore */ }
+    return render(true);
+  }
+  const wb = e.target.closest('[data-wrapped]');
+  if (wb && !wb.closest('#modal-root')) return openWrapped(Number(wb.dataset.wrapped));
+  const lv = e.target.closest('[data-lib-view]');
+  if (lv) { setLibView(lv.dataset.libView); return; }
+  const ls = e.target.closest('[data-lib-sort]');
+  if (ls) { state.sort = ls.dataset.libSort; render(true); return; }
+  const idot = e.target.closest('[data-info-dot]');
+  if (idot) { showInfo(Number(idot.dataset.infoDot)); return; }
+  const istep = e.target.closest('[data-info-step]');
+  if (istep) { showInfo((state.infoIdx || 0) + Number(istep.dataset.infoStep)); return; }
+  const hd = e.target.closest('[data-hero-dot]');
+  if (hd) { showHero(Number(hd.dataset.heroDot)); return; }
+  const wsp = e.target.closest('[data-wheel-spin]');
+  if (wsp && !wsp.disabled) return spinWheel(wsp);
   const nw = e.target.closest('[data-news-toggle],[data-news-refresh]');
   if (nw) {
     if (nw.dataset.newsToggle) { state.newsOpen = state.newsOpen === nw.dataset.newsToggle ? null : nw.dataset.newsToggle; return render(true); }
@@ -2311,6 +3530,8 @@ document.addEventListener('click', async (e) => {
   const ob = e.target.closest('[data-onb]');
   if (ob) return onboardingClick(ob);
   if (e.target.closest('[data-edit-socials]')) return editSocialsModal();
+  const ep = e.target.closest('[data-edit-profile]');
+  if (ep && !ep.closest('#modal-root')) return editProfileModal();
   const cs = e.target.closest('[data-copy-social]');
   if (cs) { try { await navigator.clipboard.writeText(cs.dataset.copySocial); toast(`Pseudo Discord copié : ${cs.dataset.copySocial}`); } catch { toast(cs.dataset.copySocial); } return; }
   const af = e.target.closest('[data-ach-filter]');

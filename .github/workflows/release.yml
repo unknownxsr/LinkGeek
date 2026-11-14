@@ -1,0 +1,54 @@
+# Builds the Windows installer (.exe + .blockmap + latest.yml) on GitHub's servers
+# and publishes the release, because Smart App Control blocks the NSIS build on
+# the developer's PC. Triggered by pushing a tag like v1.8.0, or by hand
+# (Actions → Release → Run workflow).
+#
+# Needs one repository secret: ONLINE_CONFIG = the content of
+# %APPDATA%\Linkgeek\online-config.json (Google client + Firebase project),
+# so the installer connects to the same server as everyone else.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Bundle the online configuration
+        shell: pwsh
+        env:
+          ONLINE_CONFIG: ${{ secrets.ONLINE_CONFIG }}
+        run: |
+          if (-not $env:ONLINE_CONFIG) { throw 'Secret ONLINE_CONFIG manquant (Settings → Secrets and variables → Actions)' }
+          $env:ONLINE_CONFIG | Set-Content -Path online-config.json -Encoding utf8NoBOM
+          $j = Get-Content online-config.json -Raw | ConvertFrom-Json
+          if (-not $j.firebase.projectId) { throw 'online-config.json invalide' }
+          Write-Host "Firebase project: $($j.firebase.projectId)"
+
+      - name: Build and publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --publish always
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Linkgeek-installer
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml

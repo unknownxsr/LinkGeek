@@ -1,0 +1,63 @@
+=====================================================
+  LINKGEEK 1.8.0 - VERSION DE TEST
+  Merci de m'aider à tester !
+=====================================================
+
+Linkgeek n'est pas encore signé numériquement (c'est un projet perso),
+donc Windows peut se méfier. C'est normal, voici comment faire.
+
+
+1) INSTALLER LINKGEEK
+---------------------
+Méthode normale : lance Linkgeek-Setup-1.8.0.exe
+
+  Si Windows affiche "Windows a protégé votre ordinateur" :
+    -> clique sur "Informations complémentaires"
+    -> puis sur "Exécuter quand même".
+
+Si Windows BLOQUE complètement l'installation (message "Smart App Control
+a bloqué..." sans bouton pour continuer), utilise le .zip :
+
+  a. Fais un clic droit sur Linkgeek-Setup-1.8.0.zip -> Propriétés.
+     En bas, coche "Débloquer" (si la case existe) -> OK.
+  b. Clic droit sur le .zip -> "Extraire tout..." -> Extraire.
+  c. Ouvre le dossier extrait et double-clique sur "Installer Linkgeek.cmd".
+  d. Une fenêtre noire s'ouvre : réponds à la question (O = lancer
+     Linkgeek au démarrage de Windows), puis attends "Installation terminée".
+  e. Linkgeek est sur le Bureau et dans le menu Démarrer.
+
+
+2) SE CONNECTER AVEC GOOGLE
+---------------------------
+Dans Linkgeek : Paramètres -> Compte -> "Continuer avec Google".
+
+IMPORTANT : l'appli est encore en "mode test" chez Google.
+Envoie-moi ton adresse Gmail AVANT de te connecter, sinon Google
+refusera la connexion ("Accès bloqué").
+
+
+3) M'AJOUTER EN AMI
+-------------------
+Onglet Amis -> "Ajouter un ami" -> entre mon code ami :
+
+        ____-____   (je te l'envoie)
+
+Ton propre code ami est affiché au même endroit : envoie-le-moi aussi.
+
+
+4) CE QU'IL FAUT TESTER (dans l'ordre)
+--------------------------------------
+  [ ] L'installation (exe ou zip) : est-ce que ça s'est bien passé ?
+  [ ] La connexion Google (Paramètres -> Compte)
+  [ ] L'ajout d'ami (tu me vois dans ta liste, en ligne ?)
+  [ ] Terminer un défi (onglet Défis : par exemple jouer 30 minutes)
+  [ ] Un achat dans la Boutique avec tes jetons (un thème)
+
+
+5) EN CAS DE BUG
+----------------
+Envoie-moi :
+  - une capture d'écran (touche Windows + Maj + S),
+  - ce que tu faisais juste avant le problème.
+
+Merci beaucoup !

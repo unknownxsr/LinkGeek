@@ -1,0 +1,74 @@
+{
+  "name": "linkgeek",
+  "productName": "Linkgeek",
+  "version": "1.8.0",
+  "description": "Launcher de jeux unifié : Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app, GOG et jeux ajoutés à la main, avec statistiques, succès, défis et amis.",
+  "main": "main.js",
+  "author": "Zenshyy",
+  "license": "MIT",
+  "homepage": "https://github.com/unknownxsr/linkgeek",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unknownxsr/linkgeek.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis",
+    "release": "electron-builder --win nsis --publish always",
+    "pack": "electron-builder --win dir",
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File installer/make-setup.ps1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.zenshyy.linkgeek",
+    "productName": "Linkgeek",
+    "copyright": "© 2026 Zenshyy",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png",
+      "signAndEditExecutable": false
+    },
+    "asar": false,
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Linkgeek",
+      "language": "1036",
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "Linkgeek-Setup-${version}.${ext}"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "google-oauth.json",
+      "online-config.json",
+      "firebase/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "unknownxsr",
+        "repo": "linkgeek",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

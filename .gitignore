@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Google/Firebase config and admin fingerprint: do not publish
+online-config.json
+google-oauth.json

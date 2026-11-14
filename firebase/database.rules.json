@@ -1,0 +1,291 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['name'])",
+        "name": {
+          ".validate": "newData.isString() && newData.val().length <= 40"
+        },
+        "photo": {
+          ".validate": "newData.isString() && newData.val().beginsWith('https://')"
+        },
+        "code": {
+          ".validate": "newData.isString() && root.child('codes').child(newData.val()).val() === $uid"
+        },
+        "level": {
+          ".write": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999 && ((auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true) || (data.exists() && newData.val() <= data.val()) || (!data.exists() && newData.val() <= 5) || (data.parent().child('boostAt').exists() && now - data.parent().child('boostAt').val() < 600000) || (data.exists() && newData.val() <= data.val() + 1 && (!data.parent().child('levelAt').exists() || now - data.parent().child('levelAt').val() >= (data.val() < 10 ? 600000 : 3600000))))"
+        },
+        "levelAt": {
+          ".write": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
+          ".validate": "newData.isNumber() && newData.val() === now"
+        },
+        "boostAt": {
+          ".write": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
+          ".validate": "newData.isNumber() && ((newData.val() === now && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true) || newData.val() === data.val())"
+        },
+        "admin": {
+          ".validate": "newData.val() === true && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true"
+        },
+        "joinedAt": {
+          ".validate": "newData.isNumber() && newData.val() <= now && newData.val() > 1577836800000 && (!data.exists() || newData.val() === data.val())"
+        },
+        "member": {
+          ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === newData.parent().parent().parent().child('meta').child('memberCount').val())"
+        },
+        "frame": {
+          ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20 && newData.val().matches(/^[a-z0-9_]+$/)"
+        },
+        "title": {
+          ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20 && newData.val().matches(/^[a-z_]+$/)"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "codes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && (newData.exists() ? !data.exists() && newData.val() === auth.uid : data.val() === auth.uid)",
+        ".validate": "$code.matches(/^[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/)"
+      }
+    },
+    "presence": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('friends').child($uid).child(auth.uid).exists())",
+        ".write": "auth != null && auth.uid === $uid",
+        "state": {
+          ".validate": "newData.val() === 'online' || newData.val() === 'away' || newData.val() === 'offline'"
+        },
+        "lastSeen": {
+          ".validate": "newData.isNumber() && newData.val() <= now"
+        },
+        "since": {
+          ".validate": "newData.isNumber() && newData.val() <= now"
+        },
+        "game": {
+          "id": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "source": {
+            ".validate": "newData.isString()"
+          },
+          "cover": {
+            ".validate": "newData.isString() && newData.val().beginsWith('https://')"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "cards": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('friends').child($uid).child(auth.uid).exists())",
+        ".write": "auth != null && auth.uid === $uid",
+        "top5": {
+          "$i": {
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 120"
+            },
+            "cover": {
+              ".validate": "newData.isString() && newData.val().beginsWith('https://') && newData.val().length <= 500"
+            },
+            "source": {
+              ".validate": "newData.isString() && newData.val().length <= 20"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "top": {
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "cover": {
+            ".validate": "newData.isString() && newData.val().beginsWith('https://') && newData.val().length <= 500"
+          },
+          "hours": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "ach": {
+          "unlocked": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000"
+          },
+          "total": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000"
+          },
+          "points": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+          },
+          "ultimate": {
+            ".validate": "newData.val() === true"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "games": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+        },
+        "totalHours": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000"
+        },
+        "weekHours": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 168"
+        },
+        "week": {
+          ".validate": "newData.isString() && newData.val().length <= 12"
+        },
+        "at": {
+          ".validate": "newData.val() === now"
+        },
+        "socials": {
+          "discord": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 32 && newData.val().matches(/^[a-z0-9_.]+$/)"
+          },
+          "twitch": {
+            ".validate": "newData.isString() && newData.val().length >= 3 && newData.val().length <= 25 && newData.val().matches(/^[A-Za-z0-9_]+$/)"
+          },
+          "tiktok": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 24 && newData.val().matches(/^[A-Za-z0-9_.]+$/)"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "records": {
+          "longestMin": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+          },
+          "bestStreak": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+          },
+          "monthGame": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "requests": {
+      "$to": {
+        ".read": "auth != null && auth.uid === $to",
+        "$from": {
+          ".write": "auth != null && $from !== $to && (auth.uid === $from || auth.uid === $to)",
+          ".validate": "newData.hasChildren(['name', 'at'])",
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 40"
+          },
+          "photo": {
+            ".validate": "newData.isString() && newData.val().beginsWith('https://')"
+          },
+          "at": {
+            ".validate": "newData.isNumber() && newData.val() <= now"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "friends": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$fid": {
+          ".write": "auth != null && $uid !== $fid && (!newData.exists() ? (auth.uid === $uid || auth.uid === $fid) : (auth.uid === $uid ? root.child('requests').child($uid).child($fid).exists() : auth.uid === $fid && root.child('requests').child($fid).child($uid).exists()))",
+          ".validate": "newData.val() === true"
+        }
+      }
+    },
+    "config": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
+      "ranks": {
+        "$i": {
+          ".validate": "newData.hasChildren(['key', 'name', 'min'])",
+          "key": {
+            ".validate": "newData.isString() && newData.val().length <= 20"
+          },
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 20"
+          },
+          "min": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      },
+      "$other": {
+        ".validate": false
+      }
+    },
+    "meta": {
+      ".read": "auth != null",
+      "memberCount": {
+        ".write": "auth != null",
+        ".validate": "newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1 && !root.child('users').child(auth.uid).child('member').exists() && newData.parent().parent().child('users').child(auth.uid).child('member').val() === newData.val()"
+      },
+      "$other": {
+        ".validate": false
+      }
+    },
+    "grants": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$gid": {
+          ".write": "auth != null && ((auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true) || (auth.uid === $uid && !newData.exists()))",
+          ".validate": "newData.hasChildren(['at'])",
+          "xp": {
+            ".validate": "newData.isNumber() && newData.val() >= -100000 && newData.val() <= 100000"
+          },
+          "level": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999"
+          },
+          "note": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "by": {
+            ".validate": "newData.isString() && newData.val().length <= 40"
+          },
+          "at": {
+            ".validate": "newData.isNumber() && newData.val() <= now"
+          },
+          "coins": {
+            ".validate": "newData.isNumber() && newData.val() >= -1000000 && newData.val() <= 1000000"
+          },
+          "ach": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 30 && newData.val().matches(/^[a-z_]+$/)"
+          },
+          "tier": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,11 @@
 # Builds the Windows installer (.exe + .blockmap + latest.yml) on GitHub's servers
 # and publishes the release, because Smart App Control blocks the NSIS build on
 # the developer's PC. Triggered by pushing a tag like v1.8.0, or by hand
-# (Actions → Release → Run workflow).
+# (Actions → Release → Run workflow). The version always comes from package.json.
+#
+# electron-builder only BUILDS here (--publish never). The release is then created
+# in ONE step with all 3 files by the GitHub CLI: electron-builder's own parallel
+# uploads used to create duplicate releases for the same tag (v1.8.0, v1.8.1).
 #
 # Needs one repository secret: ONLINE_CONFIG = the content of
 # %APPDATA%\Linkgeek\online-config.json (Google client + Firebase project),
@@ -15,6 +19,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -40,10 +48,27 @@ jobs:
           if (-not $j.firebase.projectId) { throw 'online-config.json invalide' }
           Write-Host "Firebase project: $($j.firebase.projectId)"
 
-      - name: Build and publish the release
+      - name: Build the installer (no upload)
+        run: npx electron-builder --win nsis --publish never
+
+      - name: Publish the release (all files at once)
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --publish always
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$v"
+          $files = @("dist/Linkgeek-Setup-$v.exe", "dist/Linkgeek-Setup-$v.exe.blockmap", "dist/latest.yml")
+          foreach ($f in $files) { if (-not (Test-Path $f)) { throw "Fichier manquant : $f" } }
+          if ((Get-Content dist/latest.yml -Raw) -notmatch "version: $([regex]::Escape($v))") { throw "latest.yml ne correspond pas à la version $v" }
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "La release $tag existe déjà : mise à jour des fichiers"
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title "Linkgeek $v" --notes "Linkgeek $v" --target $env:GITHUB_SHA --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Échec de la publication de $tag" }
 
       - uses: actions/upload-artifact@v4
         with:

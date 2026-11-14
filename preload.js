@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('nexus', {
   onUpdateReady: (cb) => ipcRenderer.on('update:ready', (_e, version) => cb(version)),
   getUpdateStatus: () => ipcRenderer.invoke('update:status'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  onUpdateState: (cb) => ipcRenderer.on('update:state', (_e, s) => cb(s)),
   getChallenges: () => ipcRenderer.invoke('challenges:get'),
   onChallenges: (cb) => ipcRenderer.on('challenges:completed', (_e, r) => cb(r)),
   onOpenChallenges: (cb) => ipcRenderer.on('challenges:open', () => cb()),

@@ -1410,7 +1410,8 @@ app.whenReady().then(async () => {
     },
   });
   ipcMain.handle('update:install', () => updater.install());
-  ipcMain.handle('update:status', () => ({ version: app.getVersion(), ready: updater.ready || null }));
+  ipcMain.handle('update:status', () => ({ version: app.getVersion(), ready: updater.ready || null, ...updater.status() }));
+  ipcMain.handle('update:check', () => updater.check({ manual: true }));
 
   await library.scan();
   achievements.ready = true;
@@ -1437,6 +1438,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (e) => {
   quitting = true;
+  if (updater) updater.installOnQuit(); // a downloaded update is installed when Linkgeek closes
   if (tracker) tracker.stop();
   if (store) store.flush();
   discord.disconnect();

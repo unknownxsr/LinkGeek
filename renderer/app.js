@@ -2959,6 +2959,7 @@ function settingsSection(s) {
       <img src="../assets/icon.png" alt="">
       <div><b>Linkgeek</b><span>Version ${esc(s.version)}</span></div>
     </div>
+    <div id="update-box">${updatePanel()}</div>
     <div class="set-list">
       <div class="set-row"><div><b>Données de l'application</b><span class="mono">${esc(s.dataPath)} · ${fmtSize(s.dataSize)}</span></div><button class="ghost" data-lib="data">${I.folder}Ouvrir</button></div>
     </div>`;
@@ -3657,25 +3658,92 @@ api.onOpenFriends(() => go('friends'));
 // Countdowns and in-progress play time
 setInterval(() => { if (state.view === 'challenges') loadChallenges(); }, 60000);
 
-/* ---------------- Updates ---------------- */
+/* ---------------- Updates ----------------
+ * State comes from main (src/updater.js): idle · checking · uptodate · downloading ·
+ * extracting · ready · installing · error · dev. Shown in Paramètres → À propos,
+ * as a pill next to the bell (download progress / "Mettre à jour"), and as a toast when ready. */
+const UP_ICON = '<svg viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>';
+const fmtMo = (b) => `${(b / 1048576).toLocaleString('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })} Mo`;
+function updatePanel() {
+  const u = state.update || { state: 'idle' };
+  const btnCheck = (label = 'Rechercher une mise à jour') => `<button class="ghost" data-update="check">${label}</button>`;
+  let icon = UP_ICON, title = '', sub = '', action = '', extra = '', cls = '';
+  switch (u.state) {
+    case 'dev': title = 'Mises à jour'; sub = 'Disponibles uniquement dans la version installée de Linkgeek.'; break;
+    case 'checking': cls = 'busy'; title = 'Recherche d\'une mise à jour…'; sub = `Version actuelle : ${esc(u.current || '')}`; break;
+    case 'uptodate': cls = 'ok'; icon = '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>'; title = 'Linkgeek est à jour'; sub = `Version ${esc(u.current || '')}${u.checkedAt ? ` · vérifié ${esc(fmtAgo(u.checkedAt))}` : ''}`; action = btnCheck('Vérifier à nouveau'); break;
+    case 'downloading': cls = 'busy'; title = `Téléchargement de la version ${esc(u.version || '')}…`;
+      sub = u.total ? `${u.pct || 0} % · ${fmtMo(u.received || 0)} / ${fmtMo(u.total)}` : 'Téléchargement en cours';
+      extra = `<div class="up-bar"><i style="width:${Math.max(2, u.pct || 0)}%"></i></div>`; break;
+    case 'extracting': cls = 'busy'; title = `Préparation de la version ${esc(u.version || '')}…`; extra = '<div class="up-bar"><i style="width:100%"></i></div>'; break;
+    case 'ready': cls = 'ready'; title = `Version ${esc(u.version || '')} prête à être installée`; sub = 'Linkgeek redémarre en quelques secondes. Sinon, elle s\'installera à la prochaine fermeture.';
+      action = `<button class="btn-play" data-update="install">${UP_ICON}Redémarrer et mettre à jour</button>`; break;
+    case 'installing': cls = 'busy'; title = 'Installation de la mise à jour…'; sub = 'Linkgeek va se fermer puis redémarrer tout seul.'; break;
+    case 'error': cls = 'err'; title = 'La mise à jour a échoué'; sub = esc(u.error || 'Erreur inconnue'); action = btnCheck('Réessayer'); break;
+    default: title = 'Mises à jour'; sub = `Version actuelle : ${esc(u.current || (state.settings && state.settings.version) || '')} · Linkgeek vérifie tout seul toutes les 6 heures`; action = btnCheck();
+  }
+  const notes = (u.state === 'ready' || u.state === 'downloading' || u.state === 'extracting') && u.notes && u.notes.trim() && u.notes.trim() !== `Linkgeek ${u.version}`
+    ? `<details class="up-notes" ${u.state === 'ready' ? 'open' : ''}><summary>Nouveautés de la version ${esc(u.version)}</summary><div>${esc(u.notes).replace(/\r?\n/g, '<br>')}</div></details>` : '';
+  const banner = u.justUpdated ? `<div class="up-banner ok">✓ Linkgeek a été mis à jour en version ${esc(u.justUpdated)}</div>`
+    : u.lastError ? `<div class="up-banner err">${esc(u.lastError)}</div>` : '';
+  return `${banner}<div class="up-card ${cls}">
+    <div class="up-ic">${icon}</div>
+    <div class="up-txt"><b>${title}</b><span>${sub}</span>${extra}</div>
+    ${action}
+  </div>${notes}`;
+}
+function renderUpdatePill() {
+  const p = $('#update-pill');
+  if (!p) return;
+  const u = state.update || {};
+  if (u.state === 'ready') { p.hidden = false; p.className = 'update-pill ready'; p.innerHTML = `${UP_ICON}<span>Mettre à jour</span>`; p.title = `Installer Linkgeek ${u.version} (redémarrage)`; }
+  else if (u.state === 'downloading' || u.state === 'extracting') { p.hidden = false; p.className = 'update-pill busy'; p.innerHTML = `${UP_ICON}<span>${u.state === 'extracting' ? '100' : (u.pct || 0)} %</span>`; p.title = `Téléchargement de Linkgeek ${u.version}`; }
+  else if (u.state === 'installing') { p.hidden = false; p.className = 'update-pill busy'; p.innerHTML = `${UP_ICON}<span>Installation…</span>`; }
+  else p.hidden = true;
+}
+function onUpdateState(u) {
+  state.update = u;
+  renderUpdatePill();
+  const box = $('#update-box');
+  if (box) box.innerHTML = updatePanel();
+}
+async function installUpdateNow(btn) {
+  if (btn) { btn.disabled = true; }
+  try { await api.installUpdate(); } catch (e) { toast(errMsg(e), true); if (btn) btn.disabled = false; }
+}
+document.addEventListener('click', async (e) => {
+  const pill = e.target.closest('#update-pill');
+  if (pill) {
+    if ((state.update || {}).state === 'ready') return installUpdateNow(pill);
+    state.settingsTab = 'about'; return go('settings');
+  }
+  const b = e.target.closest('[data-update]');
+  if (!b) return;
+  if (b.dataset.update === 'check') { b.disabled = true; try { onUpdateState(await api.checkUpdate()); } catch (err) { toast(errMsg(err), true); b.disabled = false; } }
+  if (b.dataset.update === 'install') installUpdateNow(b);
+});
+if (api.onUpdateState) {
+  api.onUpdateState(onUpdateState);
+  api.getUpdateStatus().then((s) => { if (s) { onUpdateState(s); if (s.justUpdated) toast(`Linkgeek a été mis à jour en version ${s.justUpdated} ✓`, false, true); if (s.lastError) toast(s.lastError, true); } }).catch(() => {});
+}
+
 function updateToast(version) {
   if ($('#update-toast')) return;
   const t = document.createElement('div');
   t.id = 'update-toast';
   t.className = 'toast update';
-  t.innerHTML = `<div><b>Mise à jour ${esc(version)} prête</b><span>Redémarre pour en profiter.</span></div>
+  t.innerHTML = `<div><b>Mise à jour ${esc(version)} prête</b><span>Redémarre pour l'installer, ça prend quelques secondes.</span></div>
     <button class="btn-play" data-act="install">Redémarrer</button>
     <button class="btn-glass" data-act="later" title="Elle s'installera à la prochaine fermeture">Plus tard</button>`;
   t.addEventListener('click', async (e) => {
     const act = e.target.closest('button') && e.target.closest('button').dataset.act;
     if (act === 'later') t.remove();
-    if (act === 'install') { e.target.disabled = true; e.target.textContent = 'Installation…'; await api.installUpdate(); }
+    if (act === 'install') { e.target.disabled = true; e.target.textContent = 'Installation…'; t.remove(); await installUpdateNow(); }
   });
   $('#toasts').appendChild(t);
 }
 if (api.onUpdateReady) {
   api.onUpdateReady(updateToast);
-  api.getUpdateStatus().then((s) => { if (s && s.ready) updateToast(s.ready); }).catch(() => {});
 }
 
 (async () => {

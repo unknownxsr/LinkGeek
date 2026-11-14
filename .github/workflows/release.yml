@@ -1,4 +1,4 @@
-# Builds the Windows installer (.exe + .blockmap + latest.yml) on GitHub's servers
+# Builds the Windows installer (.exe + .blockmap + latest.yml) and the update .zip on GitHub's servers
 # and publishes the release, because Smart App Control blocks the NSIS build on
 # the developer's PC. Triggered by pushing a tag like v1.8.0, or by hand
 # (Actions → Release → Run workflow). The version always comes from package.json.
@@ -51,6 +51,17 @@ jobs:
       - name: Build the installer (no upload)
         run: npx electron-builder --win nsis --publish never
 
+      # The .zip is what Linkgeek downloads to update itself from inside the launcher
+      # (src/updater.js). make-setup.ps1 bundles the online config from %APPDATA%.
+      - name: Build the update .zip
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:APPDATA 'Linkgeek'
+          New-Item -ItemType Directory -Force $d | Out-Null
+          Copy-Item online-config.json (Join-Path $d 'online-config.json') -Force
+          npm run setup
+          if ($LASTEXITCODE -ne 0) { throw 'npm run setup a échoué' }
+
       - name: Publish the release (all files at once)
         shell: pwsh
         env:
@@ -58,7 +69,7 @@ jobs:
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tag = "v$v"
-          $files = @("dist/Linkgeek-Setup-$v.exe", "dist/Linkgeek-Setup-$v.exe.blockmap", "dist/latest.yml")
+          $files = @("dist/Linkgeek-Setup-$v.exe", "dist/Linkgeek-Setup-$v.exe.blockmap", "dist/latest.yml", "dist/Linkgeek-Setup-$v.zip", "dist/LISEZ-MOI-TESTEURS.txt")
           foreach ($f in $files) { if (-not (Test-Path $f)) { throw "Fichier manquant : $f" } }
           if ((Get-Content dist/latest.yml -Raw) -notmatch "version: $([regex]::Escape($v))") { throw "latest.yml ne correspond pas à la version $v" }
           gh release view $tag *> $null
@@ -77,3 +88,4 @@ jobs:
             dist/*.exe
             dist/*.blockmap
             dist/latest.yml
+            dist/*.zip

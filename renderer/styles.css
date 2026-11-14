@@ -829,6 +829,36 @@ body, .sidebar, main, .panel, .kpi, .modal { transition: background-color .25s, 
 .about img { width: 56px; height: 56px; border-radius: 16px; }
 .about b { display: block; font-family: var(--font-display); font-size: 18px; }
 .about span { color: var(--muted); font-size: 13px; }
+/* in-launcher updates */
+.up-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin: 0 0 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); }
+.up-ic { width: 38px; height: 38px; flex-shrink: 0; border-radius: 11px; display: grid; place-items: center; background: rgba(255,255,255,.05); color: var(--muted); }
+.up-ic svg { width: 20px; height: 20px; }
+.up-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.up-txt b { font-size: 14px; }
+.up-txt span { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.up-card.ok .up-ic { color: var(--good); background: rgba(46,204,113,.12); }
+.up-card.ready { border-color: rgba(124,92,255,.55); background: linear-gradient(90deg, rgba(124,92,255,.14), transparent 70%), var(--panel); }
+.up-card.ready .up-ic { color: #fff; background: var(--accent); }
+.up-card.busy .up-ic svg { animation: up-bob 1.2s ease-in-out infinite; }
+@keyframes up-bob { 50% { transform: translateY(-3px); } }
+.up-card.err { border-color: rgba(255,90,90,.45); }
+.up-card.err .up-ic { color: #ff7a7a; background: rgba(255,90,90,.12); }
+.up-card .btn-play { height: 38px; padding: 0 16px; gap: 8px; white-space: nowrap; }
+.up-card .btn-play svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.up-bar { height: 6px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; margin-top: 5px; }
+.up-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .3s ease; }
+.up-notes { margin: -4px 0 14px; padding: 10px 14px; border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+.up-notes summary { cursor: pointer; font-weight: 700; color: var(--text); }
+.up-notes div { margin-top: 8px; line-height: 1.5; max-height: 180px; overflow: auto; }
+.up-banner { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 600; }
+.up-banner.ok { color: var(--good); background: rgba(46,204,113,.1); }
+.up-banner.err { color: #ff8a8a; background: rgba(255,90,90,.1); }
+.update-pill { -webkit-app-region: no-drag; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; margin-left: 2px; border-radius: 99px; border: 0; font: 700 11.5px var(--font); color: #fff; background: var(--accent); cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.update-pill[hidden] { display: none; }
+.update-pill svg { width: 13px; height: 13px; stroke-width: 2.2; }
+.update-pill.ready { animation: up-pulse 2s ease-in-out infinite; }
+.update-pill.busy { background: rgba(255,255,255,.08); color: var(--muted); }
+@keyframes up-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(124,92,255,.55); } 50% { box-shadow: 0 0 0 5px rgba(124,92,255,0); } }
 @media (max-width: 1200px) { .themes { grid-template-columns: 1fr 1fr; } .settings { grid-template-columns: 1fr; } .set-nav { flex-direction: row; flex-wrap: wrap; position: static; } }
 
 /* ---------- Friends ---------- */

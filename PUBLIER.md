@@ -16,27 +16,33 @@
    - Nom : `ONLINE_CONFIG` ;
    - Valeur : tout le contenu du fichier `%APPDATA%\Linkgeek\online-config.json` (ouvre-le avec le Bloc-notes, copie tout).
 5. Lance la fabrication :
-   - **Actions → Release → Run workflow**, ou crée un tag `v1.8.1` dans GitHub Desktop puis « Push ».
-   - Au bout de 5 à 10 minutes, la release **Linkgeek 1.8.1** apparaît dans **Releases**, avec automatiquement les **3 fichiers** :
-     - `Linkgeek-Setup-1.8.1.exe`
-     - `Linkgeek-Setup-1.8.1.exe.blockmap`
-     - `latest.yml` ← **indispensable** pour les mises à jour automatiques
-6. Ajoute à la main dans la même release (bouton **Edit**) le plan B, depuis ton dossier `dist` :
-   - `Linkgeek-Setup-1.8.1.zip`
-   - `LISEZ-MOI-TESTEURS.txt`
+   - **Actions → Release → Run workflow**, ou crée un tag `v1.8.3` dans GitHub Desktop puis « Push ».
+   - Au bout de 5 à 10 minutes, la release **Linkgeek 1.8.3** apparaît dans **Releases**, avec automatiquement les **5 fichiers** :
+     - `Linkgeek-Setup-1.8.3.exe` (installateur)
+     - `Linkgeek-Setup-1.8.3.exe.blockmap` et `latest.yml` (mises à jour des anciennes versions installées avec le `.exe`)
+     - `Linkgeek-Setup-1.8.3.zip` ← **indispensable** : c'est lui que le launcher télécharge pour se mettre à jour
+     - `LISEZ-MOI-TESTEURS.txt`
+6. Plus rien à ajouter à la main.
 
 Le lien de téléchargement à partager est :
 `https://github.com/unknownxsr/linkgeek/releases/latest`
 
 ## Les versions suivantes
 
-1. Dans `package.json`, augmente le numéro `"version"` (par exemple `1.8.1` → `1.8.1`).
-2. Envoie les changements sur GitHub, puis crée le tag `v1.8.1` (ou **Actions → Release → Run workflow**).
-3. GitHub fabrique et publie l'installateur tout seul. Ajoute si besoin le `.zip` fait avec `npm run setup`.
+1. Dans `package.json`, augmente le numéro `"version"` (par exemple `1.8.3` → `1.8.4`). **Obligatoire** : le launcher ne propose une mise à jour que si le numéro est plus grand que le sien.
+2. Envoie les changements sur GitHub, puis crée le tag `v1.8.4` (ou **Actions → Release → Run workflow**).
+3. GitHub fabrique et publie l'installateur et le `.zip` tout seuls.
+4. Facultatif : écris les nouveautés dans la description de la release (bouton **Edit**). Le launcher les affiche aux joueurs avant la mise à jour.
 
-Les joueurs reçoivent la mise à jour dans les 6 heures, ou au prochain lancement.
+## Comment les joueurs reçoivent la mise à jour
+
+- Linkgeek vérifie 10 secondes après le lancement, puis toutes les 6 heures, et télécharge la nouvelle version en arrière-plan.
+- Quand elle est prête : une notification « Mise à jour prête » avec **Redémarrer**, et un bouton **Mettre à jour** à côté de la cloche.
+- Dans **Paramètres → À propos** : version actuelle, bouton **Rechercher une mise à jour**, progression du téléchargement et nouveautés.
+- S'ils ne redémarrent pas, la mise à jour s'installe quand ils ferment Linkgeek.
+- Aucune installation `.exe` n'est lancée (les fichiers sont copiés par un petit script PowerShell), donc Smart App Control ne bloque pas.
 
 ## Ton PC à toi
 
-Ne lance pas le `.exe` sur ton PC (Smart App Control le bloque). Garde ta méthode habituelle :
-`npm run setup`, puis `dist\Linkgeek-Setup\install.ps1 -Silent`.
+Ne lance pas le `.exe` sur ton PC (Smart App Control le bloque). Une fois une release publiée sur GitHub, ton Linkgeek se met à jour depuis le launcher comme celui des joueurs.
+Pour tester une version pas encore publiée, garde ta méthode habituelle : `npm run setup`, puis `dist\Linkgeek-Setup\install.ps1 -Silent`.

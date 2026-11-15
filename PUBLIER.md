@@ -16,11 +16,11 @@
    - Nom : `ONLINE_CONFIG` ;
    - Valeur : tout le contenu du fichier `%APPDATA%\Linkgeek\online-config.json` (ouvre-le avec le Bloc-notes, copie tout).
 5. Lance la fabrication :
-   - **Actions → Release → Run workflow**, ou crée un tag `v1.8.3` dans GitHub Desktop puis « Push ».
-   - Au bout de 5 à 10 minutes, la release **Linkgeek 1.8.3** apparaît dans **Releases**, avec automatiquement les **5 fichiers** :
-     - `Linkgeek-Setup-1.8.3.exe` (installateur)
-     - `Linkgeek-Setup-1.8.3.exe.blockmap` et `latest.yml` (mises à jour des anciennes versions installées avec le `.exe`)
-     - `Linkgeek-Setup-1.8.3.zip` ← **indispensable** : c'est lui que le launcher télécharge pour se mettre à jour
+   - **Actions → Release → Run workflow**, ou crée un tag `v1.8.4` dans GitHub Desktop puis « Push ».
+   - Au bout de 5 à 10 minutes, la release **Linkgeek 1.8.4** apparaît dans **Releases**, avec automatiquement les **5 fichiers** :
+     - `Linkgeek-Setup-1.8.4.exe` (installateur)
+     - `Linkgeek-Setup-1.8.4.exe.blockmap` et `latest.yml` (mises à jour des anciennes versions installées avec le `.exe`)
+     - `Linkgeek-Setup-1.8.4.zip` ← **indispensable** : c'est lui que le launcher télécharge pour se mettre à jour
      - `LISEZ-MOI-TESTEURS.txt`
 6. Plus rien à ajouter à la main.
 
@@ -29,8 +29,8 @@ Le lien de téléchargement à partager est :
 
 ## Les versions suivantes
 
-1. Dans `package.json`, augmente le numéro `"version"` (par exemple `1.8.3` → `1.8.4`). **Obligatoire** : le launcher ne propose une mise à jour que si le numéro est plus grand que le sien.
-2. Envoie les changements sur GitHub, puis crée le tag `v1.8.4` (ou **Actions → Release → Run workflow**).
+1. Dans `package.json`, augmente le numéro `"version"` (par exemple `1.8.4` → `1.8.5`). **Obligatoire** : le launcher ne propose une mise à jour que si le numéro est plus grand que le sien.
+2. Envoie les changements sur GitHub, puis crée le tag `v1.8.5` (ou **Actions → Release → Run workflow**).
 3. GitHub fabrique et publie l'installateur et le `.zip` tout seuls.
 4. Facultatif : écris les nouveautés dans la description de la release (bouton **Edit**). Le launcher les affiche aux joueurs avant la mise à jour.
 

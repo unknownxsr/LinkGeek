@@ -59,7 +59,7 @@ class Library {
     const results = await Promise.allSettled([
       Promise.resolve().then(scanSteam),
       Promise.resolve().then(scanEpic),
-      scanXbox(),
+      scanXbox(this.store),
       scanOthers(),
     ]);
     const [steam, epic, xbox, others] = results.map((r) => (r.status === 'fulfilled' ? r.value : null));

@@ -14,7 +14,8 @@ const { Challenges, RANKS, sanitizeRanks } = require('./src/challenges');
 const { Covers } = require('./src/covers');
 const { DiscordPresence } = require('./src/discord');
 const { setupUpdater } = require('./src/updater');
-const { Shop, SHOP_THEMES } = require('./src/shop');
+const { Shop, SHOP_THEMES, SHOP_SEASONAL } = require('./src/shop');
+const { Cards, CARDS: CARD_LIST } = require('./src/cards');
 const { Genres, GENRES } = require('./src/genres');
 const { Titles } = require('./src/titles');
 const { News } = require('./src/news');
@@ -26,7 +27,7 @@ const THEMES = {
   dark: { bg: '#050505', symbol: '#d0d0d0' },
   light: { bg: '#eef0f5', symbol: '#2b3140' },
   // themes sold in the Boutique
-  ...Object.fromEntries(SHOP_THEMES.map((t) => [t.id, { bg: t.c.bg, symbol: t.symbol }])),
+  ...Object.fromEntries([...SHOP_THEMES, ...SHOP_SEASONAL].map((t) => [t.id, { bg: t.c.bg, symbol: t.symbol }])),
 };
 
 protocol.registerSchemesAsPrivileged([
@@ -48,6 +49,7 @@ let challenges;
 let covers;
 let updater;
 let shop;
+let cards;
 let genres;
 let titles;
 let news;
@@ -287,16 +289,20 @@ function showcaseFor(p, a) {
  * Every rank reached unlocks the matching frame around the profile picture.
  * "auto" (default) = the frame of the current rank; "none" = no frame.
  */
-function unlockedFrames() {
+function rankFrames() {
   if (!challenges) return [];
   const lv = challenges.levelInfo().level;
   return challenges.ranks().filter((r) => lv >= r.min).map((r) => r.key);
 }
+/** Rank frames reached + frames bought in the Boutique ("f_…"). */
+function unlockedFrames() {
+  return [...rankFrames(), ...(shop ? shop.ownedFrames() : [])];
+}
 function frameFor(choice) {
-  const un = unlockedFrames();
   if (choice === 'none') return null;
-  if (choice && un.includes(choice)) return choice;
-  return un[un.length - 1] || null;
+  if (choice && unlockedFrames().includes(choice)) return choice;
+  const ranks = rankFrames();
+  return ranks[ranks.length - 1] || null; // "auto" = current rank
 }
 
 /* ---------------- Records ---------------- */
@@ -589,6 +595,38 @@ function adminStats(snap) {
 
 function requireAdmin() { if (!isAdmin()) throw new Error('Réservé à l\'administrateur de Linkgeek'); }
 
+/**
+ * Admin gift of a Boutique item (theme, seasonal theme, frame): gives it or takes it back.
+ * Taking back the applied theme goes back to the default one; a removed frame stops showing
+ * on its own (frameFor only accepts unlocked frames). Returns { item, themeReset }.
+ */
+function applyItemGrant(id, remove) {
+  const item = shop.grantItem(String(id), !!remove);
+  let themeReset = false;
+  if (remove && item.kind === 'theme' && store.data.settings.theme === item.id) {
+    store.data.settings.theme = 'classic';
+    applyTheme('classic');
+    store.save();
+    themeReset = true;
+  }
+  if (item.kind === 'frame' && online) online.updateIdentity(); // friends see the frame change
+  return { item, themeReset };
+}
+
+/** Cards part of an admin gift:{ card: id | 'all', cardN (±), holo, packs (±) }, all checked. */
+function cardGrant(g) {
+  const out = {};
+  const n = Math.trunc(Number(g && g.cardN));
+  if (g && g.card && Number.isFinite(n) && n !== 0) {
+    const id = String(g.card);
+    if (id !== 'all' && !CARD_LIST.some((c) => c.id === id)) throw new Error('Carte inconnue');
+    out.card = id; out.cardN = Math.max(-999, Math.min(999, n)); out.holo = !!g.holo;
+  }
+  const p = Math.trunc(Number(g && g.packs));
+  if (Number.isFinite(p) && p !== 0) out.packs = Math.max(-999, Math.min(999, p));
+  return out;
+}
+
 /** Accepts the firebaseConfig snippet copied from the Firebase console, or JSON. */
 function parseFirebaseConfig(text) {
   const t = String(text || '');
@@ -823,6 +861,18 @@ function registerIpc() {
     if (apply) { store.data.settings.theme = t.id; applyTheme(t.id); store.save(); }
     return { shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, settings: getSettings() };
   });
+  /* ---- Collectible cards (boosters bought with tokens) ---- */
+  ipcMain.handle('cards:get', () => cards.list());
+  ipcMain.handle('cards:open', () => {
+    const gift = cards.gifts > 0;
+    const pulls = cards.open();
+    return { pulls, gift, cards: cards.list(), shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() } };
+  });
+  ipcMain.handle('shop:buyFrame', (_e, id, apply) => {
+    const f = shop.buyFrame(String(id));
+    const profile = apply ? setProfile({ frame: f.id }) : getProfile();
+    return { shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, profile };
+  });
 
   /** 5 showcased achievements: only unlocked ones, each at most once. */
   ipcMain.handle('profile:setShowcase', (_e, keys) => {
@@ -979,7 +1029,12 @@ function registerIpc() {
     const coins = Math.trunc(Number(g && g.coins));
     const hasCoins = Number.isFinite(coins) && coins !== 0;
     const hasAch = !!(g && g.ach);
-    if (!hasXp && !hasLevel && !hasCoins && !hasAch) throw new Error('Indique de l\'XP, un niveau, des jetons ou un succès');
+    const cg = cardGrant(g);
+    const hasItem = !!(g && g.item);
+    if (!hasXp && !hasLevel && !hasCoins && !hasAch && !cg.card && !cg.packs && !hasItem) throw new Error('Indique de l\'XP, un niveau, des jetons, un succès, un article, des cartes ou des boosters');
+    const itemRes = hasItem ? applyItemGrant(g.item, g.itemRemove) : null;
+    if (cg.card) cards.giveCard(cg.card, cg.cardN, cg.holo);
+    if (cg.packs) cards.addPacks(cg.packs);
     if (hasXp || hasLevel) {
       challenges.grant({
         xp: hasXp ? Math.max(-100000, Math.min(100000, xp)) : undefined,
@@ -989,8 +1044,9 @@ function registerIpc() {
     }
     if (hasCoins) shop.add(Math.max(-1000000, Math.min(1000000, coins)), `${coins > 0 ? 'Jetons ajoutés' : 'Jetons retirés'} (admin)`);
     const ach = hasAch ? grantAchOrTitle(String(g.ach), g.tier) : null;
-    return { ...afterGrant(), shop: shop.list(challenges.levelInfo().level), ach };
+    return { ...afterGrant(), shop: shop.list(challenges.levelInfo().level), ach, cards: cards.list(), themeReset: !!(itemRes && itemRes.themeReset), settings: getSettings() };
   });
+  ipcMain.handle('admin:shopCatalog', () => { requireAdmin(); return shop.catalog(); });
   ipcMain.handle('admin:achCatalog', () => {
     requireAdmin();
     return [...achievements.catalog(), ...titles.list().map((t) => ({ key: 'title_' + t.key, name: t.name, kind: 'title', tiers: ['Débloquer'] }))];
@@ -1015,6 +1071,9 @@ function registerIpc() {
     await online.sendGrant(uid, {
       xp: Number(g.xp), level: g.level ? Number(g.level) : undefined, note: g.note,
       coins: Number(g.coins), ach: g.ach || undefined, tier: g.ach ? Number(g.tier) : undefined,
+      ...cardGrant(g),
+      item: g.item && shop.catalog().some((x) => x.id === g.item) ? g.item : undefined,
+      itemRemove: g.item ? !!g.itemRemove : undefined,
     });
     return true;
   });
@@ -1345,6 +1404,26 @@ app.whenReady().then(async () => {
         send('shop:coins', { n, why });
       }
       if (typeof g.ach === 'string' && g.ach) { try { grantAchOrTitle(g.ach, Number(g.tier)); } catch { /* unknown trophy */ } }
+      try {
+        const cg = cardGrant({ card: g.card, cardN: g.cardN, holo: g.holo, packs: g.packs });
+        if (cg.card) cards.giveCard(cg.card, cg.cardN, cg.holo);
+        if (cg.packs) cards.addPacks(cg.packs);
+        if (cg.card || cg.packs) {
+          const what = [];
+          if (cg.packs) what.push(`${cg.packs > 0 ? '+' : ''}${cg.packs} booster${Math.abs(cg.packs) > 1 ? 's' : ''}`);
+          if (cg.card) {
+            const name = cg.card === 'all' ? 'toutes les cartes' : `« ${CARD_LIST.find((c) => c.id === cg.card).name} »`;
+            what.push(`${cg.cardN > 0 ? '+' : ''}${cg.cardN} ${cg.holo ? 'holo ' : ''}× ${name}`);
+          }
+          send('cards:gift', { what: what.join(' · '), by, packs: cg.packs || 0 });
+        }
+      } catch { /* unknown card */ }
+      if (typeof g.item === 'string' && g.item) {
+        try {
+          const r = applyItemGrant(g.item, g.itemRemove === true);
+          send('shop:item', { name: r.item.name, kind: r.item.kind, remove: g.itemRemove === true, by, themeReset: r.themeReset });
+        } catch { /* unknown item (older Linkgeek) */ }
+      }
       online.updateIdentity();
     },
     onUpdate: (snap) => {
@@ -1376,6 +1455,7 @@ app.whenReady().then(async () => {
   reco = new Recommender(store, () => library.games(), (id) => (genres.cache[id] || {}).tags, () => library.ownedSteam || new Set());
   titles = new Titles(store, titleContext, announceTitles);
   shop = new Shop(store);
+  cards = new Cards(store, shop);
   shop.init(challenges.levelInfo().level); // tokens for the levels reached before the Boutique existed
   setTimeout(payWheelXp, 8000); // wheel XP not added because Linkgeek closed during the spin
   // a bought theme that is no longer owned (edited file): back to the default

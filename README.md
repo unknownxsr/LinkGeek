@@ -1,6 +1,6 @@
 # Linkgeek
 
-Le launcher de jeux qui rassemble **Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app, GOG** et tes jeux ajoutés à la main, avec ton temps de jeu, tes statistiques, des succès, des défis et des niveaux, un système d'amis (profils, classement, notifications) et Discord. Disponible en français et en anglais.
+Le launcher de jeux qui rassemble **Steam, Epic Games, Xbox / Game Pass, Microsoft Store, Battle.net, Ubisoft Connect, EA app, GOG** et tes jeux ajoutés à la main, avec ton temps de jeu, tes statistiques, des succès, des défis et des niveaux, un système d'amis (profils, classement, notifications) et Discord. Disponible en français et en anglais.
 
 ## Télécharger
 

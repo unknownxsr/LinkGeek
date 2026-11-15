@@ -38,6 +38,7 @@ const SOURCES = {
   steam: { label: 'Steam', color: '#5fb4ec' },
   epic: { label: 'Epic Games', color: '#d7dbe3' },
   xbox: { label: 'Xbox / Game Pass', color: '#3ddc84' },
+  msstore: { label: 'Microsoft Store', color: '#00a4ef' },
   battlenet: { label: 'Battle.net', color: '#148eff' },
   ubisoft: { label: 'Ubisoft Connect', color: '#a9b4ff' },
   ea: { label: 'EA app', color: '#ff4747' },
@@ -338,38 +339,170 @@ function viewHome() {
   const games = visibleGames();
   if (!games.length) return state.loaded ? emptyLibrary() : loadingView();
   const recent = [...games].sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
-  const t = totals(games);
-  const favs = games.filter((g) => g.favorite);
   state.heroList = heroGames(games, recent);
   if (!(state.heroIdx < state.heroList.length)) state.heroIdx = 0;
 
+  // Dashboard: rows of widgets; every widget in a row stretches to the row height (no gaps)
   return `
   <div class="page">
     <section class="hero">${heroInner(state.heroList[state.heroIdx], state.heroIdx, state.heroList.length)}</section>
-
-    <button class="home-stats" data-nav="stats" title="Voir les statistiques">
-      <div><b>${fmtHours(t.time)}</b><span>de jeu au total</span></div>
-      <div><b>${t.count}</b><span>jeux installés</span></div>
-      <div><b>${fmtSize(t.size)}</b><span>sur le disque</span></div>
-      <div><b title="${esc(t.top && t.top.playtimeSec ? t.top.name : '')}">${esc(t.top && t.top.playtimeSec ? t.top.name : '—')}</b><span>le plus joué</span></div>
-      <i>Statistiques →</i>
-    </button>
-
-    ${weeklyBoardSection()}
-
-    <div class="home-split">
+    <div class="dash">
+      <div class="dash-row r-2-1">
+        ${weeklyBoardSection()}
+        ${homeFriendsWidget()}
+      </div>
+      <div class="dash-row r-2-1">
+        ${homeChallengesWidget()}
+        ${homeShopWidget()}
+      </div>
+      <div class="dash-row r-1-1-1">
+        ${homeAchWidget()}
+        ${homeStatsWidget(games)}
+        ${infoPanel()}
+      </div>
       ${recentNewsSection()}
-      ${infoPanel()}
     </div>
-
-    ${recoSection()}
-
-    ${favs.length ? `
-    <section class="section">
-      <div class="section-head"><div><h2>Favoris</h2><div class="sub">${favs.length} jeu${favs.length > 1 ? 'x' : ''}</div></div>${favs.length > 6 ? '<button class="link" data-nav="library">Tout voir →</button>' : ''}</div>
-      <div class="grid">${favs.slice(0, 6).map(gameCard).join('')}</div>
-    </section>` : ''}
   </div>`;
+}
+
+/* ---- Home widgets ---- */
+const homeWidget = (cls, title, sub, nav, body) => `<section class="section home-col w-${cls}">
+    <div class="section-head"><div><h2>${title}</h2>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${nav ? `<button class="link" data-nav="${nav}">Tout voir →</button>` : ''}</div>
+    <div class="panel w-body">${body}</div>
+  </section>`;
+
+function homeFriendsWidget() {
+  const fr = state.friends;
+  if (!fr || fr.status === 'unconfigured' || fr.configured === false || !fr.signedIn) {
+    return homeWidget('friends', 'Amis', 'Qui est en ligne', null,
+      `<div class="w-empty"><b>${fr && fr.signedIn === false ? 'Connecte-toi pour voir tes amis' : 'Mode en ligne non configuré'}</b><span>Tes amis apparaîtront ici avec leur statut.</span><button class="ghost sm" data-goto-account>Se connecter</button></div>`);
+  }
+  const list = fr.friends || [];
+  const order = { playing: 0, online: 1, away: 2, offline: 3 };
+  const shown = [...list].sort((a, b) => order[friendState(a)] - order[friendState(b)] || (b.lastSeen || 0) - (a.lastSeen || 0) || a.name.localeCompare(b.name, 'fr')).slice(0, 5);
+  const on = list.filter((f) => friendState(f) !== 'offline').length;
+  const body = shown.length ? `<div class="w-list">${shown.map((f) => {
+    const s = friendState(f);
+    const line = s === 'playing' ? `Joue à <b>${esc(f.game.name)}</b>` : s === 'offline' ? (f.lastSeen ? 'Vu ' + esc(fmtAgo(f.lastSeen).toLowerCase()) : 'Hors ligne') : STATUS[s].label;
+    return `<button class="w-row wf ${STATUS[s].cls}" data-friend-open="${esc(f.uid)}">
+      ${friendAvatar(f, 'sm')}
+      <div class="w-txt"><b>${esc(f.name)}</b><small class="${STATUS[s].cls}">${line}</small></div>
+      ${levelBadge(f.level || 1, 'xs')}
+    </button>`;
+  }).join('')}${shown.length < 5 ? `<button class="w-row w-add" data-nav="friends"><span class="w-add-ic">+</span><div class="w-txt"><b>Ajouter un ami</b><small>Avec son code ami</small></div></button>` : ''}</div>`
+    : '<div class="w-empty"><b>Pas encore d\'amis</b><span>Ajoute-les avec leur code ami.</span><button class="ghost sm" data-nav="friends">Ajouter un ami</button></div>';
+  return homeWidget('friends', 'Amis', `<span class="w-on"></span>${on} en ligne · ${list.length} ami${list.length > 1 ? 's' : ''}`, list.length ? 'friends' : null, body);
+}
+
+function homeChallengesWidget() {
+  const c = state.chal;
+  let body;
+  if (!c) body = '<div class="skeleton" style="height:180px"></div>';
+  else {
+    const all = [
+      ...((c.daily && c.daily.items) || []).map((x) => ({ ...x, k: 'Jour' })),
+      ...((c.weekly && c.weekly.items) || []).map((x) => ({ ...x, k: 'Semaine' })),
+      ...(c.onetime || []).map((x) => ({ ...x, k: 'Unique' })),
+    ].filter((x) => !x.doneAt);
+    const top = all.sort((a, b) => pctOf(b.value, b.goal) - pctOf(a.value, a.goal)).slice(0, 3);
+    body = top.length ? `<div class="w-list">${top.map((x) => {
+      const p = pctOf(x.value, x.goal);
+      return `<button class="w-row wc" data-nav="challenges">
+        <span class="w-ic">${CH_ICONS[x.icon] || ACH_ICONS[x.icon] || I.bolt}</span>
+        <div class="w-txt"><b>${esc(x.title)}</b>
+          <div class="wp-prog"><div class="a-bar"><i style="width:${p.toFixed(1)}%"></i></div><small>${fmtGoal(x.value, x.unit)} / ${fmtGoal(x.goal, x.unit)}</small></div></div>
+        <div class="w-side"><span class="w-kind">${x.k}</span><em>+${x.xp} XP</em></div>
+      </button>`;
+    }).join('')}</div>`
+      : '<div class="w-empty"><b>Tous tes défis sont terminés 🎉</b><span>De nouveaux défis arrivent à minuit.</span></div>';
+  }
+  return homeWidget('chal', 'Défis', 'Les plus avancés', 'challenges', body);
+}
+
+function homeAchWidget() {
+  const a = state.ach;
+  let body; let sub = 'Tes trophées';
+  if (!a || !a.items) body = '<div class="skeleton" style="height:180px"></div>';
+  else {
+    const items = a.items.filter((it) => it.kind !== 'ultimate');
+    const got = items.filter((it) => it.tier >= 1);
+    sub = `${got.length} / ${items.length} débloqués`;
+    const recent = got.filter((it) => it.tiers[0].at).sort((x, y) => y.tiers[0].at - x.tiers[0].at).slice(0, 2);
+    const near = items.filter((it) => it.tier < 1 && !it.hidden).sort((x, y) => pctOf(y.value, y.tiers[0].goal) - pctOf(x.value, x.tiers[0].goal));
+    const shown = [...recent, ...near].slice(0, 5);
+    body = `<div class="w-list">${shown.map((it) => {
+      const ok = it.tier >= 1; const t = it.tiers[0];
+      const p = ok ? 100 : pctOf(it.value, t.goal);
+      return `<button class="w-row wa ${ok ? 'got' : 'locked'}" data-nav="achievements" title="${esc(t.desc)}">
+        <span class="w-tro">${trophySvg(troArt(it), it.icon, !ok, it.hidden)}</span>
+        <div class="w-txt"><b>${esc(it.name)}</b>${ok ? `<small class="ok">✓ Débloqué ${esc(fmtAgo(t.at).toLowerCase())}</small>` : `<div class="wp-prog"><div class="a-bar"><i class="${it.rarity}" style="width:${p.toFixed(1)}%"></i></div><small>${fmtAch(it.value, it.unit)} / ${fmtAch(t.goal, it.unit)}</small></div>`}</div>
+        <span class="w-pts ${ok ? 'ok' : ''}">+${t.points}</span>
+      </button>`;
+    }).join('')}</div>`;
+  }
+  return homeWidget('ach', 'Succès', sub, 'achievements', body);
+}
+
+/** One item: the best thing you can afford right now, otherwise the closest one to afford. */
+function homeShopPick(s) {
+  const lvl = s.level || 1;
+  const pool = [
+    ...s.themes.filter((t) => !t.owned && lvl >= (t.minLevel || 1)).map((t) => ({ kind: 'theme', it: t })),
+    ...(s.frames || []).filter((f) => !f.owned).map((f) => ({ kind: 'frame', it: f })),
+  ];
+  if (!pool.length) return null;
+  const ok = pool.filter((x) => x.it.price <= s.coins).sort((a, b) => b.it.price - a.it.price);
+  return ok[0] || pool.sort((a, b) => a.it.price - b.it.price)[0];
+}
+function homeShopWidget() {
+  const s = state.shop;
+  let body;
+  if (!s) body = '<div class="skeleton" style="height:150px"></div>';
+  else {
+    const pick = homeShopPick(s);
+    if (!pick) body = '<div class="w-empty"><b>Tu as tout acheté 🎉</b><span>Il ne reste rien dans la Boutique.</span></div>';
+    else {
+      const { kind, it } = pick;
+      const afford = s.coins >= it.price;
+      const p = state.profile || {};
+      const prev = kind === 'theme' ? themePreview(it)
+        : `<div class="ws-frame"><span class="fp-pic framed r-${esc(it.id)}">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : `<div>${esc(initials(p.name || 'Joueur'))}</div>`}</span></div>`;
+      body = `<div class="ws">
+        <div class="ws-prev">${prev}</div>
+        <div class="ws-info">
+          <small>${kind === 'theme' ? `Thème ${esc(((s.rarities || {})[it.rarity] || {}).name || '')}` : 'Contour de photo'}</small>
+          <b>${esc(it.name)}</b>
+          ${afford ? `<button class="btn-play sm" ${kind === 'theme' ? `data-shop-buy="${esc(it.id)}"` : `data-frame-buy="${esc(it.id)}"`}>${COIN}${fmtCoins(it.price)}</button>`
+            : `<span class="ws-miss">${COIN}${fmtCoins(it.price)} · encore ${fmtCoins(it.price - s.coins)}</span>`}
+        </div>
+      </div>`;
+    }
+  }
+  return homeWidget('shop', 'Boutique', s ? `${COIN}<b class="ws-bal">${fmtCoins(s.coins)}</b> jetons` : '', 'shop', body);
+}
+
+function homeStatsWidget(games) {
+  const t = totals(games);
+  const sessions = allSessions();
+  const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(day0); d.setDate(d.getDate() - (6 - i)); return { d, sec: 0 }; });
+  const from = days[0].d.getTime();
+  for (const s of sessions) {
+    if (s.end < from) continue;
+    const i = Math.floor((new Date(Math.max(s.start, from)).setHours(0, 0, 0, 0) - from) / 86400000);
+    if (i >= 0 && i < 7) days[i].sec += (s.end - Math.max(s.start, from)) / 1000;
+  }
+  const week = days.reduce((a, d) => a + d.sec, 0);
+  const max = Math.max(1, ...days.map((d) => d.sec));
+  const top = t.top && t.top.playtimeSec ? t.top.name : '—';
+  const body = `<div class="wst">
+      <div><b>${fmtHours(t.time)}</b><span>au total</span></div>
+      <div><b>${week ? fmtTime(week) : '—'}</b><span>ces 7 jours</span></div>
+      <div><b>${t.count}</b><span>jeux · ${fmtSize(t.size)}</span></div>
+      <div><b title="${esc(top)}">${esc(top)}</b><span>le plus joué</span></div>
+    </div>
+    <div class="wst-chart">${days.map((d) => `<div title="${esc(fmtTime(d.sec))}"><span><i style="height:${Math.max(3, Math.round((d.sec / max) * 100))}%" class="${d.sec ? '' : 'zero'}"></i></span><small>${d.d.toLocaleDateString(state.settings && state.settings.language === 'en' ? 'en-GB' : 'fr-FR', { weekday: 'short' }).slice(0, 2)}</small></div>`).join('')}</div>`;
+  return homeWidget('stats', 'Statistiques', 'Ton temps de jeu', 'stats', body);
 }
 
 /* ---- Home: hero carousel (5 games, a new one every 5 s, in a loop) ---- */
@@ -464,14 +597,18 @@ function weeklyBoardSection() {
   else if (!w.rows.length) body = '<p class="news-empty">Personne n\'a encore joué cette semaine. Lance un jeu pour prendre la première place !</p>';
   else {
     const max = Math.max(1, ...w.rows.map((r) => r.hours));
-    body = w.rows.map((r, i) => row(r, i + 1, max)).join('');
+    const SLOTS = 5; // always 5 places on the podium, the empty ones are still to take
+    body = w.rows.slice(0, SLOTS).map((r, i) => row(r, i + 1, max)).join('');
+    for (let i = w.rows.length; i < SLOTS; i++) body += `<div class="lb-row free"><span class="lb-rank">${i + 1}</span><div class="f-avatar free-av"></div><div class="lb-name"><span>Place libre</span></div><div class="lb-bar"></div><b class="lb-val">—</b></div>`;
+    const meIdx = w.rows.findIndex((r) => r.me);
+    if (meIdx >= SLOTS) body += `<div class="wb-sep">···</div>${row(w.rows[meIdx], meIdx + 1, max)}`;
     if (w.enabled && !w.rows.some((r) => r.me)) {
       body += w.myHours > 0 && w.myRank
         ? `<div class="wb-sep">···</div>${row({ me: true, name: (state.profile && state.profile.name) || 'Moi', level: state.profile && state.profile.level ? state.profile.level.level : 1, frame: state.profile && state.profile.frame, hours: w.myHours }, w.myRank, max)}`
         : '<p class="wb-note">Tu n\'as pas encore joué cette semaine : lance un jeu pour entrer dans le classement.</p>';
     }
   }
-  return `<section class="section">
+  return `<section class="section home-col w-board">
     <div class="section-head"><div><h2>Classement général de la semaine</h2><div class="sub">${esc(sub)}</div></div>${w && !w.offline ? '<button class="link" data-board-refresh>Actualiser</button>' : ''}</div>
     <div class="panel lb wb">${body}</div>
     ${w && !w.enabled ? '<p class="lb-note">Tu as choisi de ne pas apparaître dans le classement (Paramètres → Général).</p>' : ''}
@@ -628,7 +765,7 @@ function loadingView() {
 }
 
 function emptyLibrary() {
-  return `<div class="page"><div class="empty" style="margin-top:80px"><b>Aucun jeu détecté</b>Linkgeek scanne Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app et GOG.<br>Tu peux aussi ajouter un jeu à la main.<br><br><button class="btn-play" data-add>${I.play}Ajouter un jeu</button></div></div>`;
+  return `<div class="page"><div class="empty" style="margin-top:80px"><b>Aucun jeu détecté</b>Linkgeek scanne Steam, Epic Games, Xbox / Game Pass, Microsoft Store, Battle.net, Ubisoft Connect, EA app et GOG.<br>Tu peux aussi ajouter un jeu à la main.<br><br><button class="btn-play" data-add>${I.play}Ajouter un jeu</button></div></div>`;
 }
 
 /* ---- Library: grid or list view (remembered on this PC) ---- */
@@ -1300,7 +1437,9 @@ function avatarHtml(cls, framed = true) {
     : `<div class="${cls}">${esc(initials(p.name || 'Joueur'))}</div>`;
   return framed && p.frame ? `<span class="av-frame r-${esc(p.frame)}" title="Contour ${esc(rankName(p.frame))}">${inner}</span>` : inner;
 }
-const rankName = (key) => (RANKS.find((r) => r.key === key) || {}).name || key;
+// frames sold in the Boutique (names also known here so friends' frames get a label)
+const SHOP_FRAME_NAMES = { f_inferno: 'Inferno', f_glacier: 'Glacier', f_prism: 'Prisme', f_void: 'Néant' };
+const rankName = (key) => (RANKS.find((r) => r.key === key) || {}).name || SHOP_FRAME_NAMES[key] || key;
 
 /* ---- Rank frames: chosen in the "Modifier le profil" window ---- */
 const CROWN_LOCK = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
@@ -1464,9 +1603,11 @@ async function editProfileModal() {
         <small>Visible par tes amis. Elle est enregistrée tout de suite.</small>
       </div>
     </div>`;
-  const frameOpts = () => [['auto', 'Automatique', true], ...RANKS.map((r) => [r.key, r.name, lv >= r.min, r.min]), ['none', 'Aucun', true]]
-    .map(([k, label, ok, min]) => `<button class="ep-frame ${draft.frame === k ? 'active' : ''} ${ok ? '' : 'locked'}" ${ok ? `data-ep-frame="${k}"` : 'disabled'} title="${esc(ok ? label : `Débloqué au niveau ${min}`)}">
-        <span class="fp-pic ${frameKey(k) ? `framed r-${frameKey(k)}` : ''}">${pic()}${ok ? '' : `<i class="fp-lock">${CROWN_LOCK}</i>`}</span><small>${esc(label)}</small></button>`).join('');
+  const shopFrames = (state.shop && state.shop.frames) || [];
+  const frameOpts = () => [['auto', 'Automatique', true], ...RANKS.map((r) => [r.key, r.name, lv >= r.min, `Débloqué au niveau ${r.min}`]),
+    ...shopFrames.map((f) => [f.id, f.name, f.owned, `En vente dans la Boutique · ${fmtCoins(f.price)} jetons`, true]), ['none', 'Aucun', true]]
+    .map(([k, label, ok, why, bought]) => `<button class="ep-frame ${draft.frame === k ? 'active' : ''} ${ok ? '' : 'locked'} ${bought ? 'shop' : ''}" ${ok ? `data-ep-frame="${k}"` : 'disabled'} title="${esc(ok ? label : why)}">
+        <span class="fp-pic ${frameKey(k) ? `framed r-${frameKey(k)}` : ''}">${pic()}${ok ? '' : `<i class="fp-lock">${bought ? COIN : CROWN_LOCK}</i>`}</span><small>${esc(label)}</small></button>`).join('');
 
   root.innerHTML = `<div class="modal-bg"><div class="modal ep-modal" role="dialog" aria-label="Modifier le profil">
     <div class="ep-head"><h2>${I.edit}Modifier le profil</h2><button class="ep-x" data-ep="cancel" title="Fermer">✕</button></div>
@@ -2018,7 +2159,12 @@ function onFriendsSnapshot(snap) {
     // friends who start a game: see friendActivityToast (sent by the main process)
   }
   const typing = document.activeElement && ['f-code', 'f-q', 'pf-name', 'modal-input'].includes(document.activeElement.id);
-  if (state.view === 'friends' && !typing) render(true); else renderSidebar();
+  if (state.view === 'friends' && !typing) render(true);
+  else {
+    renderSidebar();
+    const w = state.view === 'home' && document.querySelector('.w-friends');
+    if (w) w.outerHTML = homeFriendsWidget();
+  }
 }
 
 /* ---------------- Levels & challenges ---------------- */
@@ -2126,10 +2272,6 @@ function viewChallenges() {
       <div class="section-head"><div><h2>Premiers pas</h2><div class="sub">Défis uniques · ${doneOnce.length} / ${c.onetime.length} terminés</div></div></div>
       <div class="ch-grid">${[...pending, ...doneOnce].map(chCard).join('')}</div>
     </section>` : ''}
-    ${c.history.length ? `<section class="section">
-      <div class="section-head"><h2>XP gagnée récemment</h2></div>
-      <div class="panel ch-history">${c.history.map((h) => `<div><span class="ch-kind">${h.kind === 'daily' ? 'Jour' : h.kind === 'weekly' ? 'Semaine' : h.kind === 'admin' ? 'Admin' : h.kind === 'wheel' ? 'Roulette' : 'Unique'}</span><b>${esc(h.title)}</b><span class="ch-when">${esc(fmtAgo(h.at))}</span><span class="ch-xp${h.xp < 0 ? ' neg' : ''}">${signedXp(h.xp)} XP</span></div>`).join('')}</div>
-    </section>` : ''}
   </div>`;
 }
 
@@ -2138,7 +2280,7 @@ async function loadChallenges() {
     state.chal = await api.getChallenges();
     if (state.chal) setRanks(state.chal.ranks);
     if (state.chal && state.profile) state.profile.level = state.chal.level;
-    if (state.view === 'challenges') render(true); else renderSidebar();
+    if (state.view === 'challenges' || state.view === 'home') render(true); else renderSidebar();
   } catch (e) { console.error(e); }
 }
 
@@ -2189,7 +2331,7 @@ function coinToast(n, why) {
 async function loadShop() {
   try {
     state.shop = await api.getShop();
-    if (state.view === 'shop' || (state.view === 'settings' && state.settingsTab === 'appearance')) render(true); else renderSidebar();
+    if (state.view === 'shop' || state.view === 'home' || (state.view === 'settings' && (state.settingsTab === 'appearance' || state.settingsTab === 'admin'))) render(true); else renderSidebar();
   } catch (e) { console.error(e); }
 }
 
@@ -2231,6 +2373,7 @@ function viewShop() {
       <button class="ghost" data-nav="challenges">Voir mes défis</button>
     </div>
     ${s.wheel ? wheelSection(s) : ''}
+    ${(s.seasonal || []).map((t) => seasonalSection(t, s)).join('')}
     <section class="section">
       <div class="section-head"><div><h2>Thèmes</h2><div class="sub">${ownedCount} / ${s.themes.length} possédés · les thèmes achetés apparaissent aussi dans Paramètres → Apparence</div></div></div>
       ${['common', 'rare', 'epic'].map((r) => {
@@ -2242,15 +2385,83 @@ function viewShop() {
           <div class="shop-grid">${list.map(card).join('')}</div>`;
       }).join('')}
     </section>
+    ${(s.frames || []).length ? shopFramesSection(s) : ''}
     ${(s.titles || []).length ? `<section class="section">
       <div class="section-head"><div><h2>Titres</h2><div class="sub">${s.titles.filter((t) => t.unlockedAt).length} / ${s.titles.length} débloqués · ils ne s'achètent pas : remplis la condition pour les gagner, puis affiche-en un sous ton pseudo</div></div></div>
       <div class="title-grid">${s.titles.map(titleCard).join('')}</div>
     </section>` : ''}
-    ${s.log.length ? `<section class="section">
-      <div class="section-head"><h2>Historique</h2></div>
-      <div class="panel shop-log">${s.log.map((l) => `<div><span>${esc(l.why)}</span><small>${esc(fmtAgo(l.at))}</small><b class="${l.n < 0 ? 'neg' : 'pos'}">${l.n > 0 ? '+' : '−'}${fmtCoins(Math.abs(l.n))}</b></div>`).join('')}</div>
-    </section>` : ''}
   </div>`;
+}
+
+/* ---- Shop: seasonal theme (visible all year, revealed and buyable only in its window) ---- */
+function seasonLeft(ms) {
+  ms = Math.max(0, ms);
+  const d = Math.floor(ms / 86400000); const h = Math.floor(ms / 3600000) % 24; const m = Math.floor(ms / 60000) % 60;
+  return d ? `${d} j ${h} h` : h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+}
+function seasonalSection(t, s) {
+  const now = s.now || Date.now(); // the main process date (the one that decides)
+  const cur = state.settings && state.settings.theme;
+  const dates = `du ${t.season.from[1]} au ${t.season.to[1]} décembre`;
+  const year = new Date(t.opensAt).getFullYear();
+  const visual = t.hidden
+    ? `<div class="sea-gift"><div class="sea-box"><i class="rib-v"></i><i class="rib-h"></i><span class="sea-bow"></span><b>?</b></div><span class="sea-lock">${CROWN_LOCK}</span></div>`
+    : `<div class="sea-prev">${themePreview(t)}</div>`;
+  let side;
+  if (t.owned) {
+    side = cur === t.id ? '<span class="chip live">✓ Appliqué</span>' : `<button class="btn-play sm" data-shop-apply="${esc(t.id)}">Appliquer</button>`;
+  } else if (t.status === 'open') {
+    const afford = s.coins >= t.price;
+    side = `<div class="sea-count"><small>Disponible encore</small><b>${seasonLeft(t.closesAt - now)}</b></div>
+      <button class="btn-play sm ${afford ? '' : 'disabled'}" data-shop-buy="${esc(t.id)}" ${afford ? '' : 'title="Pas assez de jetons"'}>${COIN}${fmtCoins(t.price)}</button>
+      ${afford ? '' : `<span class="sea-miss">Encore ${fmtCoins(t.price - s.coins)} jetons</span>`}`;
+  } else if (t.status === 'soon') {
+    side = `<div class="sea-count"><small>Se dévoile dans</small><b>${seasonLeft(t.opensAt - now)}</b></div>
+      <button class="btn-play sm disabled" title="Disponible ${dates}">🔒 Verrouillé · ${fmtCoins(t.price)}</button>`;
+  } else {
+    side = `<div class="sea-count"><small>Plus disponible</small><b>Retour le ${t.season.from[1]} déc. ${year}</b></div>
+      <button class="btn-play sm disabled">🔒 Terminé</button>`;
+  }
+  const kicker = t.status === 'open' ? '🎄 Édition limitée · disponible maintenant' : t.status === 'soon' ? '🎁 Édition limitée · bientôt' : '❄️ Édition limitée · terminée';
+  return `<section class="section">
+    <div class="sea-card ${esc(t.id)} st-${t.status} ${t.hidden ? 'is-hidden' : ''} ${t.owned ? 'is-owned' : ''}">
+      <div class="sea-snow"></div>
+      <div class="sea-lights">${Array.from({ length: 22 }, (_, i) => `<i style="--i:${i}"></i>`).join('')}</div>
+      ${visual}
+      <div class="sea-body">
+        <span class="sea-kicker">${kicker}</span>
+        <h2>Thème ${esc(t.name)}</h2>
+        <p>${t.hidden ? `Son apparence reste secrète jusqu'au ${t.season.from[1]} décembre. Il ne sera disponible que ${dates}, puis il disparaîtra de la Boutique.` : esc(t.desc)}</p>
+        <div class="sea-dates"><span>📅 Disponible ${dates}</span>${t.owned ? '<span class="sea-own">✓ Dans ta collection</span>' : ''}</div>
+      </div>
+      <div class="sea-side">${side}</div>
+    </div>
+  </section>`;
+}
+
+/* ---- Shop: profile picture frames (same price, no level needed) ---- */
+function shopFramesSection(s) {
+  const p = state.profile || {};
+  const worn = p.frameChoice || 'auto';
+  const pic = p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : `<div>${esc(initials(p.name || 'Joueur'))}</div>`;
+  const card = (f) => {
+    const on = worn === f.id;
+    const afford = s.coins >= f.price;
+    return `<div class="frame-card ${f.owned ? 'owned' : ''} ${on ? 'active' : ''}">
+      <div class="frame-stage"><span class="fp-pic framed r-${esc(f.id)}">${pic}</span></div>
+      <div class="frame-meta">
+        <div><b>${esc(f.name)}</b><span>${esc(f.desc)}</span></div>
+        ${f.owned
+          ? (on ? '<span class="chip live">✓ Équipé</span>' : `<button class="btn-glass sm" data-frame="${esc(f.id)}">Équiper</button>`)
+          : `<button class="btn-play sm ${afford ? '' : 'disabled'}" data-frame-buy="${esc(f.id)}" ${afford ? '' : 'title="Pas assez de jetons"'}>${COIN}${fmtCoins(f.price)}</button>`}
+      </div>
+      ${!f.owned && !afford ? `<div class="shop-miss">Encore ${fmtCoins(f.price - s.coins)} jetons</div>` : ''}
+    </div>`;
+  };
+  return `<section class="section">
+    <div class="section-head"><div><h2>Contours de photo</h2><div class="sub">${s.frames.filter((f) => f.owned).length} / ${s.frames.length} possédés · tous au même prix, sans niveau requis · visibles par tes amis, à changer aussi dans « Modifier le profil »</div></div></div>
+    <div class="frame-grid">${s.frames.map(card).join('')}</div>
+  </section>`;
 }
 
 /* ---- Shop: daily wheel (1 free spin per day, slices sized by their odds) ---- */
@@ -2455,7 +2666,8 @@ async function shopClick(t) {
       return render(true);
     }
     if (d.shopBuy) {
-      const it = state.shop.themes.find((x) => x.id === d.shopBuy);
+      const it = [...state.shop.themes, ...(state.shop.seasonal || [])].find((x) => x.id === d.shopBuy);
+      if (it.season && it.status !== 'open') return toast(`Ce thème n'est disponible que du ${it.season.from[1]} au ${it.season.to[1]} décembre`, true);
       if ((state.shop.level || 1) < (it.minLevel || 1)) return toast(`Niveau ${it.minLevel} requis`, true);
       if (state.shop.coins < it.price) return toast(`Il te manque ${fmtCoins(it.price - state.shop.coins)} jetons pour ce thème`, true);
       if (!(await confirmModal(`Acheter le thème ${it.name} ?`, `Il coûte ${fmtCoins(it.price)} jetons. Il te restera ${fmtCoins(state.shop.coins - it.price)} jetons. Le thème sera appliqué tout de suite.`, 'Acheter', false))) return;
@@ -2470,8 +2682,19 @@ async function shopClick(t) {
       applyTheme(state.settings.theme);
       return render(true);
     }
+    if (d.frameBuy) {
+      const f = state.shop.frames.find((x) => x.id === d.frameBuy);
+      if (state.shop.coins < f.price) return toast(`Il te manque ${fmtCoins(f.price - state.shop.coins)} jetons pour ce contour`, true);
+      if (!(await confirmModal(`Acheter le contour ${f.name} ?`, `Il coûte ${fmtCoins(f.price)} jetons. Il te restera ${fmtCoins(state.shop.coins - f.price)} jetons. Il sera équipé tout de suite autour de ta photo de profil.`, 'Acheter', false))) return;
+      const r = await api.buyFrame(f.id, true);
+      state.shop = r.shop; state.profile = r.profile;
+      renderSidebar();
+      toast(`Contour ${f.name} acheté et équipé 🎉`);
+      return render(true);
+    }
     if (d.frame) {
       state.profile = await api.setFrame(d.frame);
+      renderSidebar();
       toast(d.frame === 'none' ? 'Contour retiré' : 'Contour mis à jour');
       return render(true);
     }
@@ -2710,9 +2933,228 @@ function nearCard(it) {
   </div>`;
 }
 
+/* ---------------- Collectible cards: « Les Gardiens du Pixel » ----------------
+ * Each creature is a pixel sprite generated from the card id (always the same),
+ * bigger and richer with rarity: Commune 10×10 · Rare 12×12 + belly colour ·
+ * Épique 14×14 + glowing eyes · Légendaire 16×16 gold + crown. */
+const CARD_GRID = { common: 10, rare: 12, epic: 14, legendary: 16 };
+const CARD_RAR = { common: { name: 'Commune', gems: 1 }, rare: { name: 'Rare', gems: 2 }, epic: { name: 'Épique', gems: 3 }, legendary: { name: 'Légendaire', gems: 4 } };
+const CARD_ORDER = ['common', 'rare', 'epic', 'legendary'];
+function cardRng(seed) {
+  let a = 2166136261;
+  for (const ch of seed) a = Math.imul(a ^ ch.charCodeAt(0), 16777619);
+  return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const creatureCache = {};
+function creatureGrid(card) {
+  if (creatureCache[card.id]) return creatureCache[card.id];
+  const N = CARD_GRID[card.rarity] || 10, hw = N / 2, R = cardRng(`${card.id}-s1`);
+  const g = Array.from({ length: N }, () => Array(N).fill('.'));
+  const top = card.rarity === 'legendary' ? 4 : 1;
+  // left half of the body: denser near the centre and the middle rows
+  for (let y = top; y < N - 1; y++) {
+    for (let x = 1; x < hw; x++) {
+      const dx = hw - 1 - x, vy = Math.abs(y - N * 0.55) / (N * 0.5);
+      if (R() < 0.97 - dx * (0.62 / hw) * 2 - vy * 0.6) g[y][x] = 'b';
+    }
+  }
+  for (let y = Math.max(top, Math.floor(N * 0.3)); y <= Math.floor(N * 0.78); y++) for (let x = hw - 2; x < hw; x++) g[y][x] = 'b';
+  // ears / horns and legs
+  const ear = 1 + Math.floor(R() * (hw - 2));
+  for (let y = top; y < Math.floor(N * 0.32); y++) g[y][ear] = 'b';
+  const leg = 1 + Math.floor(R() * (hw - 2));
+  for (let y = Math.floor(N * 0.7); y < N - 1; y++) g[y][leg] = 'b';
+  // eyes (+ pupils), mouth
+  const ey = Math.max(top + 1, Math.round(N * 0.45)), ex = hw - 2 - (N >= 14 ? 1 : 0);
+  for (let y = ey - 1; y <= ey + 2; y++) for (let x = ex - 1; x < hw; x++) if (x >= 1) g[y][x] = 'b';
+  g[ey][ex] = card.rarity === 'epic' ? 'g' : 'e';
+  g[ey + 1][ex] = card.rarity === 'epic' ? 'g' : 'p';
+  if (ey + 3 < N - 1 && R() < 0.75) g[ey + 3][hw - 1] = 'm';
+  if (card.rarity !== 'common') for (let y = ey + 3; y < N - 2; y++) for (let x = hw - 2; x < hw; x++) if (g[y][x] === 'b') g[y][x] = 'a';
+  if (card.rarity === 'legendary') { for (let x = hw - 3; x < hw; x++) g[3][x] = 'c'; g[2][hw - 3] = 'c'; g[1][hw - 3] = 'c'; g[2][hw - 1] = 'c'; g[1][hw - 1] = 'c'; g[2][hw - 2] = 'j'; }
+  // mirror
+  for (let y = 0; y < N; y++) for (let x = 0; x < hw; x++) g[y][N - 1 - x] = g[y][x];
+  const solid = (v) => v !== '.' && v !== 'k';
+  const at = (y, x) => (y >= 0 && y < N && x >= 0 && x < N ? g[y][x] : '.');
+  // drop lonely pixels, then outline and light / shadow
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (g[y][x] === 'b' && ![at(y - 1, x), at(y + 1, x), at(y, x - 1), at(y, x + 1)].some(solid)) g[y][x] = '.';
+  const out = g.map((row) => row.slice());
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (g[y][x] === '.' && [at(y - 1, x), at(y + 1, x), at(y, x - 1), at(y, x + 1)].some(solid)) out[y][x] = 'k';
+    else if (g[y][x] === 'b' && !solid(at(y - 1, x))) out[y][x] = 'l';
+    else if (g[y][x] === 'b' && !solid(at(y + 1, x))) out[y][x] = 'd';
+  }
+  creatureCache[card.id] = out;
+  return out;
+}
+function creatureSvg(card, silhouette = false) {
+  const g = creatureGrid(card), N = g.length, h = card.hue;
+  const pal = silhouette ? null : {
+    b: `hsl(${h} 62% 55%)`, l: `hsl(${h} 78% 72%)`, d: `hsl(${h} 55% 37%)`, k: '#15131d', a: `hsl(${(h + 170) % 360} 60% 64%)`,
+    e: '#ffffff', p: '#15131d', m: '#3a1020', g: '#7dffef', c: '#ffe066', j: '#ff3d6e',
+  };
+  let rects = '';
+  for (let y = 0; y < N; y++) {
+    let x = 0;
+    while (x < N) {
+      const v = g[y][x];
+      if (v === '.') { x++; continue; }
+      let w = 1;
+      while (x + w < N && g[y][x + w] === v) w++;
+      const fill = silhouette ? (v === 'k' ? 'rgba(0,0,0,.55)' : 'rgba(0,0,0,.85)') : pal[v];
+      rects += `<rect x="${x}" y="${y}" width="${w}" height="1" fill="${fill}"/>`;
+      x += w;
+    }
+  }
+  return `<svg class="cs" viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`;
+}
+const cardNum = (n) => `#${String(n).padStart(2, '0')}`;
+function tradingCard(card, opts = {}) {
+  const owned = opts.forceShow || card.n > 0;
+  const holo = opts.holo !== undefined ? opts.holo : card.holo > 0;
+  const r = CARD_RAR[card.rarity];
+  return `<div class="tcard r-${card.rarity} ${holo && owned ? 'holo' : ''} ${owned ? '' : 'missing'}" style="--hue:${card.hue}" data-tilt>
+    <div class="tc-inner">
+      <div class="tc-top"><span class="tc-num">${cardNum(card.num)}</span><span class="tc-genre">${owned ? esc(card.genre) : '???'}</span></div>
+      <div class="tc-art">${creatureSvg(card, !owned)}</div>
+      <div class="tc-name">${owned ? esc(card.name) : '???'}</div>
+      <div class="tc-rar"><i>${'◆'.repeat(r.gems)}</i><span>${esc(r.name)}</span></div>
+    </div>
+    ${holo && owned ? '<span class="tc-holo">HOLO</span>' : ''}
+    ${!opts.noCount && card.n > 1 ? `<span class="tc-count">×${card.n}</span>` : ''}
+    ${opts.badge ? `<span class="tc-new">${esc(opts.badge)}</span>` : ''}
+  </div>`;
+}
+const CARD_BACK = `<div class="tcard back"><div class="tc-back"><div class="tcb-logo"><img src="../assets/icon.png" alt=""></div><b>Les Gardiens du Pixel</b><small>Série 1</small></div></div>`;
+
+async function loadCards() {
+  try { state.cards = await api.getCards(); } catch (e) { console.error(e); return; }
+  if ((state.view === 'achievements' && state.achTab === 'cards') || (state.view === 'settings' && state.settingsTab === 'admin')) render(true);
+}
+
+function viewCards() {
+  const c = state.cards;
+  const head = (sub) => `<div class="page-head"><div>${achSwitch('cards')}<div class="sub">${sub}</div></div></div>`;
+  if (!c) { loadCards(); return `<div class="page">${head('Chargement…')}</div>`; }
+  const coins = state.shop ? state.shop.coins : c.coins;
+  const left = c.leftToday !== undefined ? c.leftToday : 1;
+  const gifts = c.gifts || 0;
+  const afford = gifts > 0 || (coins >= c.price && left > 0);
+  const pct = Math.round((c.owned / c.total) * 100);
+  const waitMs = Math.max(0, (c.nextDayAt || 0) - Date.now());
+  const waitTxt = `${Math.floor(waitMs / 3600000)} h ${String(Math.floor(waitMs / 60000) % 60).padStart(2, '0')}`;
+  const daily = `<div class="ch-daily ${left ? '' : 'done'}"><span class="pips">${Array.from({ length: c.dailyLimit || 3 }, (_, i) => `<i class="${i < (c.openedToday || 0) ? 'used' : ''}"></i>`).join('')}</span>
+    <span>${left ? `${left} booster${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''} aujourd'hui` : `Limite de ${c.dailyLimit} boosters atteinte · nouveaux boosters dans ${waitTxt}`}</span></div>`;
+  return `<div class="page cards-page">
+    ${head(`${c.owned} / ${c.total} cartes · série ${c.series.number} « ${esc(c.series.name)} »`)}
+    <div class="cards-hero">
+      <div class="booster-pack" data-open-booster title="Ouvrir un booster">
+        <div class="bp-shine"></div>
+        <div class="bp-art">${creatureSvg((c.cards.find((x) => x.rarity === 'legendary') || c.cards[0]), false)}</div>
+        <b>Les Gardiens du Pixel</b><small>Booster · ${c.size} cartes</small>
+      </div>
+      <div class="cards-hero-body">
+        <span class="ch-kicker">Série ${c.series.number}</span>
+        <h2>${esc(c.series.name)}</h2>
+        <p>20 créatures originales, une par style de jeu. Chaque booster contient ${c.size} cartes, et chaque carte peut sortir en version holographique.</p>
+        <div class="ch-prog"><div class="up-bar"><i style="width:${Math.max(2, pct)}%"></i></div><span>${c.owned} / ${c.total} · ${pct} %</span></div>
+        <div class="ch-stats"><div><b>${c.holos}</b><span>holographiques</span></div><div><b>${c.totalCards}</b><span>cartes au total</span></div><div><b>${c.opened}</b><span>boosters ouverts</span></div></div>
+        <div class="ch-buy">
+          ${gifts ? `<button class="btn-play" data-open-booster>🎁 Ouvrir un booster offert</button>`
+            : `<button class="btn-play ${afford ? '' : 'disabled'}" data-open-booster>${COIN}Ouvrir un booster · ${fmtCoins(c.price)}</button>`}
+          <span class="ch-coins">${gifts ? 'Gratuit, en plus de ta limite du jour' : coins >= c.price ? `Tu as ${fmtCoins(coins)} jetons` : `Il te manque ${fmtCoins(c.price - coins)} jetons`}</span>
+        </div>
+        ${gifts ? `<div class="ch-gift">🎁 <span><b>${gifts} booster${gifts > 1 ? 's' : ''} offert${gifts > 1 ? 's' : ''}</b> à ouvrir</span></div>` : ''}
+        ${daily}
+        <div class="ch-odds">${CARD_ORDER.map((r) => `<span class="r-${r}"><i>${'◆'.repeat(CARD_RAR[r].gems)}</i>${esc(CARD_RAR[r].name)} ${c.rarities[r].pct} %</span>`).join('')}<span class="holo-odd">Holo ${c.holoPct} %</span></div>
+      </div>
+    </div>
+    ${CARD_ORDER.map((r) => {
+      const list = c.cards.filter((x) => x.rarity === r);
+      return `<section class="section"><div class="tro-head card-head r-${r}"><div><h2>${esc(CARD_RAR[r].name)}${list.length > 1 ? 's' : ''}</h2><span>${c.rarities[r].pct} % par carte</span></div><i>${list.filter((x) => x.n > 0).length} / ${list.length}</i></div>
+        <div class="tcard-grid">${list.map((x) => tradingCard(x)).join('')}</div></section>`;
+    }).join('')}
+  </div>`;
+}
+
+/** Buys + opens a booster: pack wobble, then the 5 cards flip one by one (rarest last). */
+async function openBoosterFlow() {
+  if (state.boosterBusy) return;
+  const c = state.cards;
+  const coins = state.shop ? state.shop.coins : (c && c.coins) || 0;
+  const gift = !!(c && c.gifts > 0); // an offered booster: free, outside the daily limit
+  if (!gift && c && c.leftToday === 0) return toast(`Tu as déjà ouvert ${c.dailyLimit} boosters aujourd'hui. Reviens demain !`, true);
+  if (!gift && c && coins < c.price) return toast(`Il te manque ${fmtCoins(c.price - coins)} jetons pour un booster`, true);
+  state.boosterBusy = true;
+  let r;
+  try { r = await api.openBooster(); } catch (e) { state.boosterBusy = false; return toast(errMsg(e), true); }
+  state.cards = r.cards; state.shop = r.shop;
+  renderSidebar();
+  const byId = Object.fromEntries(r.cards.cards.map((x) => [x.id, x]));
+  const pulls = r.pulls.map((p) => ({ ...p, card: byId[p.id] }))
+    .sort((a, b) => CARD_ORDER.indexOf(a.card.rarity) - CARD_ORDER.indexOf(b.card.rarity) || (a.holo ? 1 : 0) - (b.holo ? 1 : 0));
+  const root = $('#modal-root');
+  root.innerHTML = `<div class="modal-bg booster-bg"><div class="booster-modal">
+    <div class="bm-pack">${$('.booster-pack') ? $('.booster-pack').outerHTML.replace('data-open-booster', '') : ''}</div>
+    <div class="bm-row" hidden>${pulls.map((p) => `<div class="flip r-${p.card.rarity}"><div class="flip-in"><div class="flip-face back">${CARD_BACK}</div><div class="flip-face front">${tradingCard(p.card, { forceShow: true, holo: p.holo, noCount: true, badge: p.isNew ? 'Nouvelle !' : p.newHolo ? 'Nouvelle holo !' : '' })}</div></div></div>`).join('')}</div>
+    <div class="bm-foot" hidden>
+      <span class="bm-sum"></span>
+      <div class="bm-btns"><button class="ghost" data-booster-close>Voir ma collection</button><button class="btn-play" data-booster-again>${COIN}Ouvrir un autre · ${fmtCoins(r.cards.price)}</button></div>
+    </div>
+  </div></div>`;
+  const pack = root.querySelector('.bm-pack');
+  pack.classList.add('shake');
+  await new Promise((res) => setTimeout(res, 900));
+  pack.classList.add('burst');
+  await new Promise((res) => setTimeout(res, 350));
+  pack.hidden = true;
+  const row = root.querySelector('.bm-row');
+  row.hidden = false;
+  const flips = [...row.querySelectorAll('.flip')];
+  for (const f of flips) { await new Promise((res) => setTimeout(res, 480)); f.classList.add('on'); }
+  await new Promise((res) => setTimeout(res, 500));
+  const news = r.pulls.filter((p) => p.isNew).length;
+  const holos = r.pulls.filter((p) => p.holo).length;
+  const foot = root.querySelector('.bm-foot');
+  foot.querySelector('.bm-sum').textContent = `${news ? `${news} nouvelle${news > 1 ? 's' : ''} carte${news > 1 ? 's' : ''}` : 'Aucune nouvelle carte'}${holos ? ` · ${holos} holo${holos > 1 ? 's' : ''}` : ''} · ${r.cards.owned} / ${r.cards.total} dans ta collection`;
+  const again = foot.querySelector('[data-booster-again]');
+  if (r.cards.gifts > 0) again.innerHTML = `🎁 Ouvrir un autre booster offert (${r.cards.gifts})`;
+  else if (r.cards.leftToday === 0) { again.classList.add('disabled'); again.title = `Limite de ${r.cards.dailyLimit} boosters par jour atteinte`; again.lastChild.textContent = 'Limite du jour atteinte'; }
+  else if (r.shop.coins < r.cards.price) { again.classList.add('disabled'); again.title = 'Pas assez de jetons'; }
+  else again.lastChild.textContent = `Ouvrir un autre · ${fmtCoins(r.cards.price)} (${r.cards.leftToday} restant${r.cards.leftToday > 1 ? 's' : ''})`;
+  foot.hidden = false;
+  state.boosterBusy = false;
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-booster-close]')) { $('#modal-root').innerHTML = ''; return render(true); }
+  if (e.target.closest('[data-booster-again]')) { $('#modal-root').innerHTML = ''; render(true); return openBoosterFlow(); }
+  if (e.target.closest('[data-open-booster]')) return openBoosterFlow();
+  const t = e.target.closest('[data-ach-tab]');
+  if (t) { state.achTab = t.dataset.achTab; if (state.achTab === 'cards') loadCards(); return render(true); }
+});
+// gentle 3D tilt of the cards under the mouse
+document.addEventListener('mousemove', (e) => {
+  const c = e.target.closest && e.target.closest('[data-tilt]');
+  if (state.tiltEl && state.tiltEl !== c) { state.tiltEl.style.transform = ''; state.tiltEl.style.removeProperty('--mx'); state.tiltEl = null; }
+  if (!c || c.classList.contains('missing')) return;
+  const b = c.getBoundingClientRect();
+  const px = (e.clientX - b.left) / b.width, py = (e.clientY - b.top) / b.height;
+  c.style.transform = `perspective(700px) rotateY(${((px - 0.5) * 14).toFixed(1)}deg) rotateX(${((0.5 - py) * 14).toFixed(1)}deg) translateY(-4px)`;
+  c.style.setProperty('--mx', `${(px * 100).toFixed(0)}%`);
+  c.style.setProperty('--my', `${(py * 100).toFixed(0)}%`);
+  state.tiltEl = c;
+});
+
+/* ---- Succès / Cartes switch next to the page title ---- */
+const achSwitch = (tab) => `<div class="ach-switch" role="tablist">
+  <button class="${tab === 'cards' ? '' : 'on'}" data-ach-tab="trophies" role="tab"><h1>Succès</h1></button>
+  <button class="${tab === 'cards' ? 'on' : ''}" data-ach-tab="cards" role="tab"><h1>Cartes</h1></button>
+</div>`;
+
 function viewAchievements() {
+  if (state.achTab === 'cards') return viewCards();
   const a = state.ach;
-  const head = (sub) => `<div class="page-head"><div><h1>Succès</h1><div class="sub">${sub}</div></div></div>`;
+  const head = (sub) => `<div class="page-head"><div>${achSwitch('trophies')}<div class="sub">${sub}</div></div></div>`;
   if (!a) return `<div class="page">${head('Chargement…')}</div>`;
   const items = a.items;
   const f = ['all', 'got', 'todo'].includes(state.achFilter) ? state.achFilter : 'all';
@@ -2768,7 +3210,7 @@ function viewAchievements() {
 async function loadAchievements() {
   try {
     state.ach = await api.getAchievements();
-    if (state.view === 'achievements') render(true); else renderSidebar();
+    if (state.view === 'achievements' || state.view === 'home') render(true); else renderSidebar();
   } catch (e) { console.error(e); }
 }
 
@@ -2864,7 +3306,7 @@ function settingsSection(s) {
   const tab = state.settingsTab;
   if (tab === 'appearance') {
     return `<h2>Thème de l'application</h2><p class="set-desc">Choisis l'ambiance de Linkgeek. Le changement est immédiat.</p>
-      <div class="themes">${[...THEMES, ...((state.shop && state.shop.themes) || []).filter((t) => t.owned)].map((t) => `
+      <div class="themes">${[...THEMES, ...((state.shop && state.shop.themes) || []).filter((t) => t.owned), ...((state.shop && state.shop.seasonal) || []).filter((t) => t.owned)].map((t) => `
         <button class="theme-card ${s.theme === t.id ? 'active' : ''}" data-theme-pick="${t.id}">
           ${themePreview(t)}
           <div class="theme-meta"><span class="radio"></span><div><b>${esc(t.name)}</b><span>${esc(t.desc)}</span></div></div>
@@ -2945,7 +3387,7 @@ function settingsSection(s) {
       </div>`;
   }
   if (tab === 'library') {
-    return `<h2>Bibliothèque</h2><p class="set-desc">Linkgeek détecte automatiquement Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app et GOG.</p>
+    return `<h2>Bibliothèque</h2><p class="set-desc">Linkgeek détecte automatiquement Steam, Epic Games, Xbox / Game Pass, Microsoft Store, Battle.net, Ubisoft Connect, EA app et GOG.</p>
       <div class="set-list">
         <div class="set-row"><div><b>Rescanner les bibliothèques</b><span>${visibleGames().length} jeux détectés actuellement</span></div><button class="ghost" data-lib="rescan">Rescanner</button></div>
         <div class="set-row"><div><b>Ajouter un jeu manuellement</b><span>Pour un jeu installé hors des plateformes reconnues (.exe ou raccourci)</span></div><button class="ghost" data-add>Ajouter</button></div>
@@ -2963,6 +3405,25 @@ function settingsSection(s) {
     <div class="set-list">
       <div class="set-row"><div><b>Données de l'application</b><span class="mono">${esc(s.dataPath)} · ${fmtSize(s.dataSize)}</span></div><button class="ghost" data-lib="data">${I.folder}Ouvrir</button></div>
     </div>`;
+}
+
+/** Every Boutique item (themes, seasonal themes, frames), grouped; "(possédé)" = on my profile. */
+function shopItemOptions() {
+  const s = state.shop;
+  if (!s) { loadShop(); return '<option value="">Chargement…</option>'; }
+  const rar = s.rarities || {};
+  const groups = [
+    ...['common', 'rare', 'epic'].map((r) => [`Thèmes · ${(rar[r] || {}).name || r}`, s.themes.filter((t) => (t.rarity || 'common') === r)]),
+    ['Thèmes saisonniers', s.seasonal || []],
+    ['Contours de photo', s.frames || []],
+  ].filter(([, l]) => l.length);
+  return `<option value="">— Aucun —</option>${groups.map(([label, l]) => `<optgroup label="${esc(label)}">${l.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}${x.owned ? ' (possédé)' : ''}</option>`).join('')}</optgroup>`).join('')}`;
+}
+
+function cardOptions() {
+  const c = state.cards;
+  if (!c) { loadCards(); return '<option value="">Chargement…</option>'; }
+  return `<option value="">— Aucune —</option><option value="all">Toutes les cartes (${c.total})</option>${CARD_ORDER.map((r) => `<optgroup label="${esc(CARD_RAR[r].name)}">${c.cards.filter((x) => x.rarity === r).map((x) => `<option value="${esc(x.id)}">${cardNum(x.num)} ${esc(x.name)}${x.n ? ` (×${x.n}${x.holo ? `, ${x.holo} holo` : ''})` : ''}</option>`).join('')}</optgroup>`).join('')}`;
 }
 
 function adminSection(s) {
@@ -2984,7 +3445,7 @@ function adminSection(s) {
     </div>
 
     <h3 class="set-h3">Donner une récompense</h3>
-    <p class="set-note">XP, niveau, jetons de la Boutique et succès ou trophées (secrets et ultime compris), à toi ou à un joueur. Remplis seulement ce que tu veux donner.</p>
+    <p class="set-note">XP, niveau, jetons de la Boutique, succès ou trophées (secrets et ultime compris), articles de la Boutique (thèmes, thèmes saisonniers, contours), cartes à collectionner et boosters, à toi ou à un joueur. Remplis seulement ce que tu veux donner. Un booster offert s'ouvre gratuitement, en plus de la limite de ${(state.cards && state.cards.dailyLimit) || 3} par jour.</p>
     <div class="adm-grant">
       <label>Destinataire<select id="adm-target">
         <option value="me">Moi (${esc((state.profile && state.profile.name) || 'mon profil')})</option>
@@ -2997,6 +3458,12 @@ function adminSection(s) {
       <label>Jetons (négatif pour retirer)<input id="adm-gcoins" type="number" step="100" placeholder="0"></label>
       <label>Succès ou trophée<select id="adm-ach">${achOptions()}</select></label>
       <label>Palier<select id="adm-tier">${tierOptions('')}</select></label>
+      <label>Article de la Boutique<select id="adm-item">${shopItemOptions()}</select></label>
+      <label>Action sur l'article<select id="adm-itemop"><option value="give">Donner</option><option value="remove">Retirer</option></select></label>
+      <label>Carte à collectionner<select id="adm-card">${cardOptions()}</select></label>
+      <label>Nombre de cartes (négatif pour retirer)<input id="adm-cardn" type="number" step="1" placeholder="0"></label>
+      <label class="adm-check"><input id="adm-holo" type="checkbox"><span>Version holographique</span></label>
+      <label>Boosters offerts (négatif pour retirer)<input id="adm-packs" type="number" step="1" placeholder="0"></label>
       <label class="wide">Message (facultatif, pour un autre joueur)<input id="adm-note" maxlength="80" placeholder="Bravo pour le tournoi !"></label>
       <button class="btn-play sm" data-adm="grant">Donner</button>
     </div>
@@ -3148,13 +3615,30 @@ async function adminClick(t) {
         coins: $('#adm-gcoins').value ? num('#adm-gcoins') : undefined,
         ach: $('#adm-ach').value || undefined,
         tier: $('#adm-ach').value ? Number($('#adm-tier').value) : undefined,
+        card: $('#adm-card').value || undefined,
+        cardN: $('#adm-cardn').value ? Math.trunc(num('#adm-cardn')) : undefined,
+        holo: $('#adm-holo').checked,
+        packs: $('#adm-packs').value ? Math.trunc(num('#adm-packs')) : undefined,
+        item: $('#adm-item').value || undefined,
+        itemRemove: $('#adm-item').value ? $('#adm-itemop').value === 'remove' : undefined,
       };
-      if (!g.xp && !g.level && !g.coins && !g.ach) throw new Error('Indique de l\'XP, un niveau, des jetons ou un succès');
+      if (g.card && !g.cardN) throw new Error('Indique le nombre de cartes (négatif pour en retirer)');
+      if (!g.card && g.cardN) throw new Error('Choisis la carte à donner ou à retirer');
+      if (!g.card) { delete g.cardN; delete g.holo; }
+      if (!g.xp && !g.level && !g.coins && !g.ach && !g.card && !g.packs && !g.item) throw new Error('Indique de l\'XP, un niveau, des jetons, un succès, un article, des cartes ou des boosters');
+      const itemName = g.item ? $('#adm-item').selectedOptions[0].textContent.replace(/ \(possédé\)$/, '') : '';
       const achName = g.ach ? $('#adm-ach').selectedOptions[0].textContent : '';
-      const parts = [g.xp ? `${signedXp(g.xp)} XP` : '', g.level ? `niveau ${g.level}` : '', g.coins ? `${g.coins > 0 ? '+' : '−'}${fmtCoins(Math.abs(g.coins))} jetons` : '', g.ach ? `${achName} (${$('#adm-tier').selectedOptions[0].textContent})` : ''].filter(Boolean).join(', ');
+      const cardName = g.card === 'all' ? 'toutes les cartes' : g.card ? `« ${(state.cards.cards.find((x) => x.id === g.card) || {}).name} »` : '';
+      const parts = [g.xp ? `${signedXp(g.xp)} XP` : '', g.level ? `niveau ${g.level}` : '', g.coins ? `${g.coins > 0 ? '+' : '−'}${fmtCoins(Math.abs(g.coins))} jetons` : '', g.ach ? `${achName} (${$('#adm-tier').selectedOptions[0].textContent})` : '',
+        g.card ? `${g.cardN > 0 ? '+' : '−'}${Math.abs(g.cardN)} ${g.holo ? 'holo ' : ''}× ${cardName}` : '',
+        g.packs ? `${g.packs > 0 ? '+' : '−'}${Math.abs(g.packs)} booster${Math.abs(g.packs) > 1 ? 's' : ''}` : '',
+        g.item ? `${g.itemRemove ? 'retrait de' : '+'} ${itemName}` : ''].filter(Boolean).join(', ');
       if (target === 'me') {
         const r = await api.adminSelfGrant(g);
         if (r.shop) state.shop = r.shop;
+        if (r.cards) state.cards = r.cards;
+        if (r.themeReset) applyTheme('classic');
+        if (g.item) renderSidebar();
         loadAchievements();
         await done(r, `Pour toi : ${parts}`);
       } else {
@@ -3193,7 +3677,7 @@ function applyTheme(theme) {
  * Capped at ~30 fps, paused while Linkgeek is hidden, off with "reduce motion". */
 const FX = { kind: null, canvas: null, raf: 0, last: 0, w: 0, h: 0, dpr: 1, data: null };
 function themeFx(theme) {
-  const kind = theme === 'matrix' || theme === 'galaxy' ? theme : null;
+  const kind = theme === 'matrix' || theme === 'galaxy' || theme === 'noel' ? theme : null;
   if (FX.kind === kind) return;
   cancelAnimationFrame(FX.raf);
   if (FX.canvas) { FX.canvas.remove(); FX.canvas = null; }
@@ -3218,6 +3702,9 @@ function fxResize() {
     const size = 16;
     FX.data = { size, drops: Array.from({ length: Math.ceil(FX.w / size) }, () => Math.random() * -FX.h / size), chars: 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789'.split('') };
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, FX.w, FX.h);
+  } else if (FX.kind === 'noel') {
+    const n = Math.round((FX.w * FX.h) / 12000);
+    FX.data = { flakes: Array.from({ length: n }, () => ({ x: Math.random() * FX.w, y: Math.random() * FX.h, r: Math.random() * 2.2 + 0.6, v: Math.random() * 0.6 + 0.35, p: Math.random() * Math.PI * 2, a: Math.random() * 0.5 + 0.35 })) };
   } else {
     const n = Math.round((FX.w * FX.h) / 5200);
     FX.data = { stars: Array.from({ length: n }, () => ({ x: Math.random() * FX.w, y: Math.random() * FX.h, r: Math.random() * 1.3 + 0.2, s: Math.random() * 0.12 + 0.02, p: Math.random() * Math.PI * 2, hue: [270, 320, 200, 0][Math.floor(Math.random() * 4)] })), shoot: null, nextShoot: performance.now() + 3000 };
@@ -3241,6 +3728,15 @@ function fxFrame(t) {
       ctx.fillText(ch, x, py);
       d.drops[i] = py > FX.h && Math.random() > 0.975 ? 0 : y + 1;
     });
+  } else if (FX.kind === 'noel') {
+    // gentle snowfall, each flake swaying a little
+    ctx.clearRect(0, 0, FX.w, FX.h);
+    for (const f of d.flakes) {
+      f.y += f.v * (0.6 + f.r / 3); f.x += Math.sin(t / 1600 + f.p) * 0.35;
+      if (f.y > FX.h + 4) { f.y = -4; f.x = Math.random() * FX.w; }
+      ctx.fillStyle = `rgba(255, 255, 255, ${f.a})`;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
+    }
   } else {
     ctx.clearRect(0, 0, FX.w, FX.h);
     for (const s of d.stars) {
@@ -3434,10 +3930,10 @@ function go(view, gameId = null) {
   state.view = view;
   if (view === 'stats' || view === 'game') refreshStats();
   if (view === 'settings') loadSettings();
-  if (view === 'achievements') loadAchievements();
+  if (view === 'achievements') { loadAchievements(); if (state.achTab === 'cards') loadCards(); }
   if (view === 'shop') loadShop();
   if (view === 'game' && gameId) { state.newsOpen = null; loadNews(gameId); }
-  if (view === 'home') { loadRecentNews(); loadReco(); if (!state.ach) loadAchievements(); if (!state.shop) loadShop(); if (!state.weeklyAt || Date.now() - state.weeklyAt > 60000) loadWeekly(); }
+  if (view === 'home') { loadRecentNews(); loadAchievements(); loadShop(); loadChallenges(); refreshStats(); if (!state.weeklyAt || Date.now() - state.weeklyAt > 60000) loadWeekly(); }
   if (view === 'challenges' || view === 'profile') loadChallenges();
   if (view === 'friends') loadMyCard();
   api.noteVisit(view).catch(() => {}); // secret trophy "Curieux"
@@ -3447,7 +3943,7 @@ function go(view, gameId = null) {
 async function refreshStats() {
   try {
     state.stats = await api.getStats();
-    if (state.view === 'stats' || state.view === 'game') render(true);
+    if (state.view === 'stats' || state.view === 'game' || state.view === 'home') render(true);
   } catch (e) { console.error(e); }
 }
 
@@ -3526,7 +4022,7 @@ document.addEventListener('click', async (e) => {
     nw.disabled = true; nw.textContent = 'Actualisation…';
     await api.refreshNews(); state.news = {}; return loadRecentNews();
   }
-  const sh = e.target.closest('[data-shop-buy],[data-shop-apply],[data-frame],[data-title-equip],[data-genre],[data-genre-reset]');
+  const sh = e.target.closest('[data-shop-buy],[data-shop-apply],[data-frame],[data-frame-buy],[data-title-equip],[data-genre],[data-genre-reset]');
   if (sh && !sh.disabled) return shopClick(sh);
   const ob = e.target.closest('[data-onb]');
   if (ob) return onboardingClick(ob);
@@ -3652,6 +4148,15 @@ api.onChallenges(onChallengesDone);
 api.onOpenChallenges(() => go('challenges'));
 api.onFriendActivity(friendActivityToast);
 api.onShopCoins((c) => { coinToast(c.n, c.why); loadShop(); });
+if (api.onShopItem) api.onShopItem(async (g) => {
+  const what = g.kind === 'frame' ? 'Contour' : 'Thème';
+  toast(g.remove ? `${what} ${g.name} retiré par ${g.by}` : `🎁 ${what} ${g.name} offert par ${g.by} !`);
+  if (g.themeReset) { applyTheme('classic'); state.settings = await api.getSettings(); }
+  if (g.kind === 'frame') { const d = await api.getLibrary(); state.profile = d.profile; renderSidebar(); }
+  loadShop();
+  if (state.view === 'settings' || state.view === 'profile') render(true);
+});
+if (api.onCardsGift) api.onCardsGift((g) => { toast(`🃏 Cartes de ${g.by} : ${g.what}`); loadCards(); });
 api.onOpenShop(() => go('shop'));
 api.onTitles((l) => { titleToast(l); reload().then(() => render(true)); });
 api.onOpenFriends(() => go('friends'));
@@ -3751,8 +4256,10 @@ if (api.onUpdateReady) {
   const [, , fr] = await Promise.all([reload(), loadSettings(), api.getFriends()]);
   state.friends = fr;
   render();
-  setTimeout(loadChallenges, 1500);
+  loadChallenges();
   loadShop();
+  loadAchievements();
+  refreshStats();
   setTimeout(loadRecentNews, 2500);
   setTimeout(loadReco, 3000);
   api.onReco(() => loadReco());

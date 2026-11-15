@@ -5,7 +5,7 @@
 
 ## What it is
 Linkgeek is an Electron 39 game launcher for Windows. The interface is in French, with an English mode. It brings together:
-- **Libraries:** Steam, Epic, Xbox/Game Pass, Battle.net, Ubisoft Connect, EA app, GOG and games added by hand.
+- **Libraries:** Steam, Epic, Xbox/Game Pass, Microsoft Store (older UWP games, identified through the Store catalog), Battle.net, Ubisoft Connect, EA app, GOG and games added by hand.
 - **Tracking and progress:** playtime, statistics, achievements (Bronze → Platinum), challenges with XP, levels and badges.
 - **Online and social:** friends via Firebase, an admin mode, Discord Rich Presence and automatic updates from GitHub Releases.
 
@@ -32,7 +32,7 @@ Node is not always on PATH in the tool shell. In PowerShell, start with:
   - Titles: `titles.js` holds the profile titles and their conditions, computed by `titleContext()` in `main.js`. Each title's progress relies on the genres from `genres.js`, which uses SteamSpy tags; the player can override a genre by hand.
   - Recommendations: `recommend.js` builds the player profile (families of SteamSpy tags weighted by playtime), then picks popular games from SteamSpy tag lists that the player doesn't own (`library.ownedSteam`), with Steam store prices (12 h cache).
   - News: `news.js` fetches Steam announcements through the public ISteamNews API (3 h cache, Nouveau badge, Nouveautés panel and home section). Non-Steam games only get a link.
-  - Libraries and assets: `scanners/` (one file per platform; `others.js` covers Battle.net, Ubisoft, EA and GOG through the registry), `library.js`, `covers.js` (artwork found by name through the Steam store search) and `tracker.js` (processes, every 20 s).
+  - Libraries and assets: `scanners/` (one file per platform; `xbox.js` covers Xbox/Game Pass and Microsoft Store games; `others.js` covers Battle.net, Ubisoft, EA and GOG through the registry), `library.js`, `covers.js` (artwork found by name through the Steam store search) and `tracker.js` (processes, every 20 s).
   - Progress: `achievements.js`, `challenges.js` (XP, levels, ranks).
   - Online and integrations: `online.js` (Firebase REST, SSE streams, account deletion, protected level), `discord.js` (named-pipe IPC, no dependency), `updater.js`.
   - Storage: `store.js`, which writes `%APPDATA%\Linkgeek\library.json`.

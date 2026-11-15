@@ -1,6 +1,6 @@
 # Politique de confidentialité de Linkgeek
 
-*Dernière mise à jour : 14 novembre 2026*
+*Dernière mise à jour : 15 novembre 2026*
 
 Linkgeek est un launcher de jeux gratuit pour Windows, développé par Zenshyy, une personne qui édite l'application à titre personnel. Cette page explique quelles données Linkgeek utilise, pourquoi, où elles sont stockées et comment les faire supprimer.
 
@@ -13,11 +13,11 @@ Linkgeek est un launcher de jeux gratuit pour Windows, développé par Zenshyy, 
 
 ## 1. Données qui restent sur ton ordinateur
 
-Linkgeek analyse tes jeux installés (Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app, GOG et les jeux ajoutés à la main) et enregistre localement :
+Linkgeek analyse tes jeux installés (Steam, Epic Games, Xbox / Game Pass, Microsoft Store, Battle.net, Ubisoft Connect, EA app, GOG et les jeux ajoutés à la main) et enregistre localement :
 
 - la liste de tes jeux, leurs jaquettes, tes favoris, tes collections et les jeux masqués ;
 - ton temps de jeu, tes sessions, tes succès, tes défis, ton XP et ton niveau ;
-- tes jetons de la Boutique et les thèmes achetés ;
+- tes jetons de la Boutique, les thèmes et contours de photo achetés, et ta collection de cartes ;
 - ton profil local (pseudo, avatar, top 5) et tes réglages.
 
 Ces données sont stockées dans le dossier `%APPDATA%\Linkgeek` de ton PC. **Elles ne sont envoyées à personne**, sauf ce qui est décrit aux sections 3 à 6. Tu peux les supprimer à tout moment en effaçant ce dossier.
@@ -45,13 +45,13 @@ Si tu te connectes avec Google, Linkgeek utilise **Google Firebase** (Authentica
 | Ta carte de profil : ton top 5 (noms et images des jeux), ton jeu le plus joué et son temps de jeu, ton nombre de jeux, ton temps de jeu total et celui de la semaine, ton nombre de succès et de points (et si tu as le trophée ultime), tes records (session la plus longue, plus longue série de jours joués, jeu du mois), les 5 succès que tu as choisi de mettre en vitrine (nom, palier, icône) et les pseudos Discord, Twitch et TikTok que tu as choisi d'ajouter | Afficher ton profil quand un ami clique sur toi, et le classement entre amis | **Tes amis uniquement** |
 | Ton entrée au classement général de la semaine : pseudo, photo Google, contour, titre, niveau et heures de jeu du lundi au dimanche (une entrée par semaine) | Afficher le top 10 des joueurs de la semaine sur l'accueil | **Tous les joueurs connectés.** Tu peux t'en retirer à tout moment : Paramètres → Général → « Apparaître dans le classement général » (ton entrée de la semaine est alors effacée) |
 | Tes demandes d'ami et ta liste d'amis | Gérer tes amis | Toi (et la personne concernée par une demande) |
-| Les cadeaux d'XP ou de niveau envoyés par l'administrateur de Linkgeek (montant, message, nom de l'expéditeur, date) | Te les remettre | Toi. **Ils sont effacés du serveur dès que ton Linkgeek les reçoit.** |
+| Les cadeaux envoyés par l'administrateur de Linkgeek (XP, niveau, jetons, succès, articles de la Boutique, cartes et boosters ; message, nom de l'expéditeur, date) | Te les remettre | Toi. **Ils sont effacés du serveur dès que ton Linkgeek les reçoit.** |
 
 Linkgeek garde une connexion ouverte avec la base de données pendant que tu es connecté, pour que les changements (amis en ligne, jeux lancés) arrivent en temps réel. Aucune donnée supplémentaire n'est envoyée pour cela.
 
 La base de données est hébergée dans **l'Union européenne (Belgique, région europe-west1)**. Les règles de sécurité de la base empêchent un joueur de lire ou de modifier les données d'un autre en dehors de ce qui est décrit dans le tableau.
 
-**Le rôle d'administrateur :** un seul compte (celui de l'éditeur) peut envoyer de l'XP ou un niveau à un joueur, modifier la table des rangs et afficher un badge « Admin ». Pour suivre la santé du service, son Linkgeek peut aussi lire les profils publics, les statuts, les cartes de profil et les listes d'amis de tous les joueurs, afin de calculer des **statistiques globales** (nombre de joueurs en ligne, actifs, nouveaux inscrits, temps de jeu total, jeux les plus joués, répartition des niveaux, nombre d'amitiés). Le tableau de bord n'affiche que ces totaux et des noms de jeux, jamais le nom, l'e-mail ou les réseaux d'un joueur, et rien n'est conservé à part l'historique du nombre de joueurs en ligne, sur le PC de l'administrateur, pendant 7 jours. La table des rangs (noms des badges et niveaux requis) ne contient aucune donnée personnelle.
+**Le rôle d'administrateur :** un seul compte (celui de l'éditeur) peut envoyer ou retirer de l'XP, un niveau, des jetons, des succès, des articles de la Boutique, des cartes ou des boosters à un joueur, modifier la table des rangs et afficher un badge « Admin ». Pour suivre la santé du service, son Linkgeek peut aussi lire les profils publics, les statuts, les cartes de profil et les listes d'amis de tous les joueurs, afin de calculer des **statistiques globales** (nombre de joueurs en ligne, actifs, nouveaux inscrits, temps de jeu total, jeux les plus joués, répartition des niveaux, nombre d'amitiés). Le tableau de bord n'affiche que ces totaux et des noms de jeux, jamais le nom, l'e-mail ou les réseaux d'un joueur, et rien n'est conservé à part l'historique du nombre de joueurs en ligne, sur le PC de l'administrateur, pendant 7 jours. La table des rangs (noms des badges et niveaux requis) ne contient aucune donnée personnelle.
 
 **Base légale :** ces données sont traitées parce que tu as choisi d'activer le mode en ligne (exécution du service que tu demandes, article 6.1.b du RGPD).
 
@@ -68,6 +68,8 @@ Linkgeek vérifie régulièrement s'il existe une nouvelle version sur **GitHub*
 ## 6. Images des jeux
 
 Pour afficher les jaquettes, Linkgeek charge des images depuis les serveurs des boutiques (par exemple Steam). Pour les jeux dont le launcher ne fournit pas d'image (Battle.net, Ubisoft Connect, EA app, GOG, jeux ajoutés à la main), Linkgeek **envoie le nom du jeu** à la recherche du magasin Steam pour trouver sa jaquette. Ces serveurs reçoivent une requête technique classique (adresse IP), comme quand tu visites leur site. Aucune information sur toi n'est jointe.
+
+Pour les jeux du **Microsoft Store** qui ne sont pas des jeux Xbox / Game Pass (anciens jeux UWP), Linkgeek doit savoir quelles applications installées sont des jeux. Pour chaque application du Microsoft Store installée sur ton PC (hors applications Windows et composants système), il envoie **le nom technique de l'application** (« PackageFamilyName », par exemple `Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe`) au **catalogue public du Microsoft Store** (displaycatalog.mp.microsoft.com). Le catalogue répond si c'est un jeu, avec son titre et ses images. La réponse est gardée sur ton PC : chaque application n'est interrogée **qu'une seule fois**. Rien d'autre n'est envoyé (ni compte Microsoft, ni temps de jeu).
 
 Pour afficher les nouveautés de tes jeux Steam (notes de mise à jour, annonces), Linkgeek interroge l'**API publique des actualités Steam** avec **l'identifiant Steam du jeu**, au plus une fois toutes les 3 heures par jeu. Rien d'autre n'est envoyé.
 

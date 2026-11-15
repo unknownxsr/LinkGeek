@@ -14,7 +14,7 @@
  *   cards/{uid}            { top5, top, ach, games, …Hours }     public profile (friends only)
  *   requests/{to}/{from}   { name, photo, at }      pending friend requests
  *   friends/{uid}/{fid}    true
- *   grants/{uid}/{id}      { xp, level, note, by, at }   gifts from the admin
+ *   grants/{uid}/{id}      { xp, level, coins, ach, tier, card, cardN, holo, packs, item, itemRemove, note, by, at }   gifts from the admin
  *   config/ranks           rank table set by the admin
  */
 const IDP_BASE = process.env.LINKGEEK_IDP_BASE || 'https://identitytoolkit.googleapis.com';
@@ -550,7 +550,13 @@ class Online {
     if (g.note) body.note = String(g.note).slice(0, 120);
     if (Number.isFinite(g.coins) && g.coins !== 0) body.coins = Math.max(-1000000, Math.min(1000000, Math.trunc(g.coins)));
     if (g.ach) { body.ach = String(g.ach).slice(0, 30); body.tier = Math.max(0, Math.min(4, Math.floor(Number(g.tier) || 0))); }
-    if (body.xp === undefined && body.level === undefined && body.coins === undefined && body.ach === undefined) throw new Error('Indique de l\'XP, un niveau, des jetons ou un succès');
+    if (g.card && /^[a-z]{1,20}$/.test(String(g.card)) && Number.isFinite(g.cardN) && g.cardN !== 0) {
+      body.card = String(g.card); body.cardN = Math.max(-999, Math.min(999, Math.trunc(g.cardN)));
+      if (g.holo) body.holo = true;
+    }
+    if (Number.isFinite(g.packs) && g.packs !== 0) body.packs = Math.max(-999, Math.min(999, Math.trunc(g.packs)));
+    if (g.item && /^[a-z_]{2,30}$/.test(String(g.item))) { body.item = String(g.item); if (g.itemRemove) body.itemRemove = true; }
+    if (body.xp === undefined && body.level === undefined && body.coins === undefined && body.ach === undefined && body.card === undefined && body.packs === undefined && body.item === undefined) throw new Error('Indique de l\'XP, un niveau, des jetons, un succès, un article, des cartes ou des boosters');
     await this.db('POST', `grants/${uid}`, body);
     if (body.xp === undefined && body.level === undefined) return;
     // lets the player show their new level right away (see publishLevel)

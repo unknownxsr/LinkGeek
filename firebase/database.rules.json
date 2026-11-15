@@ -354,6 +354,24 @@
           "tier": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
           },
+          "card": {
+            ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 20 && newData.val().matches(/^[a-z]+$/)"
+          },
+          "cardN": {
+            ".validate": "newData.isNumber() && newData.val() >= -999 && newData.val() <= 999"
+          },
+          "holo": {
+            ".validate": "newData.isBoolean()"
+          },
+          "packs": {
+            ".validate": "newData.isNumber() && newData.val() >= -999 && newData.val() <= 999"
+          },
+          "item": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 30 && newData.val().matches(/^[a-z_]+$/)"
+          },
+          "itemRemove": {
+            ".validate": "newData.isBoolean()"
+          },
           "$other": {
             ".validate": false
           }

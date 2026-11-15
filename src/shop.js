@@ -31,9 +31,46 @@ const THEMES = [
   { id: 'holo', rarity: 'epic', name: 'Holographique', desc: 'Reflets irisés qui changent de couleur en permanence', price: 3750,
     c: { bg: '#0a0a12', side: '#10101b', card: '#1a1a2b', text: '#f6f5ff', muted: '#8d8bb0', accent: 'linear-gradient(135deg,#ff7ad9,#7af0ff 35%,#b7ff7a 65%,#ffd27a)', glow: 'radial-gradient(150px 70px at 85% 0%, rgba(122,240,255,.35), transparent), radial-gradient(110px 60px at 15% 100%, rgba(255,122,217,.3), transparent)' }, symbol: '#ffffff' },
 ];
+/**
+ * Seasonal themes: shown all year in the Boutique, but only revealed and buyable during
+ * their window (every year, local time, both days included). Not in the wheel, no level
+ * needed. Before the window the window gets only the name and the dates, not the look.
+ */
+const SEASONAL = [
+  { id: 'noel', rarity: 'seasonal', name: 'Noël', desc: 'Neige qui tombe, rouge velours, vert sapin et guirlandes dorées', price: 1200,
+    season: { from: [12, 15], to: [12, 27] },
+    c: { bg: '#0b0d10', side: '#0e1512', card: '#1a1214', text: '#fff6ec', muted: '#9a8a7c', accent: 'linear-gradient(135deg,#e5383b,#f4c95d 55%,#2fa36b)', glow: 'radial-gradient(130px 70px at 85% 0%, rgba(229,56,59,.38), transparent), radial-gradient(110px 60px at 10% 100%, rgba(47,163,107,.32), transparent)' }, symbol: '#ffe8a3' },
+];
+const nowMs = () => Number(process.env.LINKGEEK_TEST_NOW) || Date.now(); // tests can fake the date
+/** Where we are in a seasonal window: soon (with opensAt), open (closesAt) or ended (opensAt next year). */
+function seasonInfo(t, now = nowMs()) {
+  const d = new Date(now);
+  const y = d.getFullYear();
+  const [fm, fd] = t.season.from; const [tm, td] = t.season.to;
+  const open = new Date(y, fm - 1, fd).getTime();
+  const close = new Date(y, tm - 1, td + 1).getTime(); // end of the last day
+  if (now < open) return { status: 'soon', opensAt: open, closesAt: close };
+  if (now < close) return { status: 'open', opensAt: open, closesAt: close };
+  return { status: 'ended', opensAt: new Date(y + 1, fm - 1, fd).getTime(), closesAt: new Date(y + 1, tm - 1, td + 1).getTime() };
+}
+
 // minLevel: profile level needed to BUY a theme of that rarity (a wheel win ignores it: pure luck)
 const RARITIES = { common: { name: 'Commun', order: 0, minLevel: 1 }, rare: { name: 'Rare', order: 1, minLevel: 15 }, epic: { name: 'Épique', order: 2, minLevel: 40 } };
 const THEME_ODDS = { common: 70, rare: 25, epic: 5 }; // wheel "random theme" prize
+
+/**
+ * Profile picture frames sold in the Boutique: all the same price, no level needed,
+ * cheaper than the most expensive themes. Once bought, a frame can be chosen like the
+ * rank frames ("Modifier le profil") and friends see it (users/{uid}/frame).
+ * Ids start with "f_" so they never clash with rank keys.
+ */
+const FRAME_PRICE = 1500;
+const FRAMES = [
+  { id: 'f_inferno', name: 'Inferno', desc: 'Des flammes qui ondulent et vacillent autour de ta photo' },
+  { id: 'f_glacier', name: 'Glacier', desc: 'Glace polie et reflets givrés qui glissent' },
+  { id: 'f_prism', name: 'Prisme', desc: 'Un arc-en-ciel qui tourne sans fin' },
+  { id: 'f_void', name: 'Néant', desc: 'Une spirale cosmique violette qui pulse lentement' },
+].map((f) => ({ ...f, price: FRAME_PRICE }));
 
 /**
  * Daily wheel: one free spin per day (local midnight). Weights are percentages,
@@ -65,8 +102,25 @@ class Shop {
     const s = d.shop;
     s.coins = Number(s.coins) || 0;
     s.owned = Array.isArray(s.owned) ? s.owned : [];
+    s.frames = Array.isArray(s.frames) ? s.frames : []; // bought profile frames
     s.log = Array.isArray(s.log) ? s.log : [];   // [{ at, n, why }]
     return s;
+  }
+
+  ownedFrames() { return this.data.frames.filter((id) => FRAMES.some((f) => f.id === id)); }
+
+  buyFrame(id) {
+    const f = FRAMES.find((x) => x.id === id);
+    if (!f) throw new Error('Contour introuvable');
+    const s = this.data;
+    if (s.frames.includes(id)) throw new Error('Tu possèdes déjà ce contour');
+    if (s.coins < f.price) throw new Error(`Il te manque ${f.price - s.coins} jetons`);
+    s.coins -= f.price;
+    s.frames.push(id);
+    s.log.unshift({ at: Date.now(), n: -f.price, why: `Achat : contour ${f.name}` });
+    s.log = s.log.slice(0, 40);
+    this.store.save();
+    return f;
   }
 
   add(n, why) {
@@ -108,13 +162,39 @@ class Shop {
 
   owns(id) { return this.data.owned.includes(id); }
 
+  /** Every item the admin can give or take back: themes (seasonal included) and frames. */
+  catalog() {
+    return [
+      ...THEMES.map((t) => ({ id: t.id, kind: 'theme', name: t.name, group: `Thèmes ${RARITIES[t.rarity].name.toLowerCase()}s` })),
+      ...SEASONAL.map((t) => ({ id: t.id, kind: 'theme', name: t.name, group: 'Thèmes saisonniers' })),
+      ...FRAMES.map((f) => ({ id: f.id, kind: 'frame', name: f.name, group: 'Contours de photo' })),
+    ].map((x) => ({ ...x, owned: x.kind === 'frame' ? this.data.frames.includes(x.id) : this.data.owned.includes(x.id) }));
+  }
+
+  /** Admin: gives (remove = false) or takes back an item, without tokens. Returns the item. */
+  grantItem(id, remove = false) {
+    const it = this.catalog().find((x) => x.id === id);
+    if (!it) throw new Error('Article de la Boutique inconnu');
+    const s = this.data;
+    const list = it.kind === 'frame' ? s.frames : s.owned;
+    const i = list.indexOf(id);
+    if (remove) { if (i >= 0) list.splice(i, 1); } else if (i < 0) list.push(id);
+    this.store.save();
+    return it;
+  }
+
   buy(id, level = 1) {
-    const t = THEMES.find((x) => x.id === id);
+    const t = THEMES.find((x) => x.id === id) || SEASONAL.find((x) => x.id === id);
     if (!t) throw new Error('Article introuvable');
     const s = this.data;
     if (s.owned.includes(id)) throw new Error('Tu possèdes déjà ce thème');
-    const need = (RARITIES[t.rarity] || RARITIES.common).minLevel;
-    if (level < need) throw new Error(`Il faut être niveau ${need} pour acheter un thème ${RARITIES[t.rarity].name.toLowerCase()}`);
+    if (t.season) {
+      const si = seasonInfo(t);
+      if (si.status !== 'open') throw new Error(`Le thème ${t.name} n'est disponible que du ${t.season.from[1]} au ${t.season.to[1]} décembre`);
+    } else {
+      const need = (RARITIES[t.rarity] || RARITIES.common).minLevel;
+      if (level < need) throw new Error(`Il faut être niveau ${need} pour acheter un thème ${RARITIES[t.rarity].name.toLowerCase()}`);
+    }
     if (s.coins < t.price) throw new Error(`Il te manque ${t.price - s.coins} jetons`);
     s.coins -= t.price;
     s.owned.push(id);
@@ -179,6 +259,15 @@ class Shop {
       coins: s.coins,
       level,
       themes: THEMES.map((t) => ({ ...t, owned: s.owned.includes(t.id), minLevel: (RARITIES[t.rarity] || RARITIES.common).minLevel })),
+      frames: FRAMES.map((f) => ({ ...f, owned: s.frames.includes(f.id) })),
+      seasonal: SEASONAL.map((t) => {
+        const owned = s.owned.includes(t.id);
+        const si = seasonInfo(t);
+        // not revealed before its window (unless already owned): name, price and dates only
+        if (!owned && si.status === 'soon') return { id: t.id, name: t.name, rarity: t.rarity, price: t.price, season: t.season, owned, hidden: true, ...si };
+        return { ...t, owned, ...si };
+      }),
+      now: nowMs(),
       rarities: RARITIES,
       themeOdds: THEME_ODDS,
       log: s.log.slice(0, 15),
@@ -188,4 +277,4 @@ class Shop {
   }
 }
 
-module.exports = { Shop, SHOP_THEMES: THEMES, tokensForXp, tokensForLevel };
+module.exports = { Shop, SHOP_THEMES: THEMES, SHOP_SEASONAL: SEASONAL, SHOP_FRAMES: FRAMES, tokensForXp, tokensForLevel };

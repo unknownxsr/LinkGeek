@@ -1,5 +1,5 @@
 =====================================================
-  LINKGEEK 1.8.3 - VERSION DE TEST
+  LINKGEEK 1.8.4 - VERSION DE TEST
   Merci de m'aider à tester !
 =====================================================
 
@@ -9,7 +9,7 @@ donc Windows peut se méfier. C'est normal, voici comment faire.
 
 1) INSTALLER LINKGEEK
 ---------------------
-Méthode normale : lance Linkgeek-Setup-1.8.3.exe
+Méthode normale : lance Linkgeek-Setup-1.8.4.exe
 
   Si Windows affiche "Windows a protégé votre ordinateur" :
     -> clique sur "Informations complémentaires"
@@ -18,7 +18,7 @@ Méthode normale : lance Linkgeek-Setup-1.8.3.exe
 Si Windows BLOQUE complètement l'installation (message "Smart App Control
 a bloqué..." sans bouton pour continuer), utilise le .zip :
 
-  a. Fais un clic droit sur Linkgeek-Setup-1.8.3.zip -> Propriétés.
+  a. Fais un clic droit sur Linkgeek-Setup-1.8.4.zip -> Propriétés.
      En bas, coche "Débloquer" (si la case existe) -> OK.
   b. Clic droit sur le .zip -> "Extraire tout..." -> Extraire.
   c. Ouvre le dossier extrait et double-clique sur "Installer Linkgeek.cmd".

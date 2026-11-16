@@ -1,6 +1,6 @@
 # Politique de confidentialité de Linkgeek
 
-*Dernière mise à jour : 15 novembre 2026*
+*Dernière mise à jour : 16 novembre 2026*
 
 Linkgeek est un launcher de jeux gratuit pour Windows, développé par Zenshyy, une personne qui édite l'application à titre personnel. Cette page explique quelles données Linkgeek utilise, pourquoi, où elles sont stockées et comment les faire supprimer.
 
@@ -42,7 +42,7 @@ Si tu te connectes avec Google, Linkgeek utilise **Google Firebase** (Authentica
 | Ton niveau, la date de son dernier changement, le contour de photo et le titre choisis | Afficher ton badge de niveau et ton contour ; limiter la triche (le serveur n'accepte qu'une montée de niveau à la fois) | Les joueurs connectés à Linkgeek |
 | Ton statut (en ligne, absent, hors ligne) et le jeu en cours (nom, plateforme, image) | Montrer à tes amis à quoi tu joues, et les prévenir quand tu lances un jeu | **Tes amis uniquement** |
 | La date de création de ton compte et ton numéro de membre (dans l'ordre d'inscription) | Afficher « Membre depuis » et le badge « Fondateur » des 100 premiers membres | Les joueurs connectés à Linkgeek |
-| Ta carte de profil : ton top 5 (noms et images des jeux), ton jeu le plus joué et son temps de jeu, ton nombre de jeux, ton temps de jeu total et celui de la semaine, ton nombre de succès et de points (et si tu as le trophée ultime), tes records (session la plus longue, plus longue série de jours joués, jeu du mois), les 5 succès que tu as choisi de mettre en vitrine (nom, palier, icône) et les pseudos Discord, Twitch et TikTok que tu as choisi d'ajouter | Afficher ton profil quand un ami clique sur toi, et le classement entre amis | **Tes amis uniquement** |
+| Ta carte de profil : ton top 5 (noms et images des jeux), l'image de ta bannière (celle de ton jeu n° 1 ou de ton jeu le plus joué), ton jeu le plus joué et son temps de jeu, ton nombre de jeux, ton temps de jeu total et celui de la semaine, ton nombre de succès et de points (et si tu as le trophée ultime), tes records (session la plus longue, plus longue série de jours joués, jeu du mois), les 3 succès que tu as choisi de mettre en vitrine (nom, palier, icône), tes 2 meilleures cartes à collectionner et les pseudos Discord, Twitch et TikTok que tu as choisi d'ajouter | Afficher ton profil quand un ami clique sur toi, et le classement entre amis | **Tes amis uniquement** |
 | Ton entrée au classement général de la semaine : pseudo, photo Google, contour, titre, niveau et heures de jeu du lundi au dimanche (une entrée par semaine) | Afficher le top 10 des joueurs de la semaine sur l'accueil | **Tous les joueurs connectés.** Tu peux t'en retirer à tout moment : Paramètres → Général → « Apparaître dans le classement général » (ton entrée de la semaine est alors effacée) |
 | Tes demandes d'ami et ta liste d'amis | Gérer tes amis | Toi (et la personne concernée par une demande) |
 | Les cadeaux envoyés par l'administrateur de Linkgeek (XP, niveau, jetons, succès, articles de la Boutique, cartes et boosters ; message, nom de l'expéditeur, date) | Te les remettre | Toi. **Ils sont effacés du serveur dès que ton Linkgeek les reçoit.** |

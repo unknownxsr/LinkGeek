@@ -342,6 +342,46 @@
     '✓ Déjà connecté': '✓ Already signed in', 'Passer': 'Skip', 'Suivant': 'Next', "C'est parti !": "Let's go!",
     // ---- stats / profile / challenges leftovers ----
     'Espace occupé': 'Space used', 'tous les jeux mesurés': 'all games measured', 'sur le disque': 'on disk', 'de jeu': 'played',
+    // ---- profile preview ----
+    'Aperçu': 'Preview', 'Aperçu : c\'est ce que voient tes amis en cliquant sur toi': 'Preview: this is what your friends see when they click on you',
+    // ---- uninstall / duplicates ----
+    'Désinstaller…': 'Uninstall…', 'Désinstaller': 'Uninstall', 'Fenêtre de désinstallation ouverte dans Steam': 'Uninstall window opened in Steam',
+    'Bibliothèque Epic Games ouverte': 'Epic Games library opened', 'Désinstallation lancée': 'Uninstall started', 'Applications installées de Windows ouvertes': 'Windows Installed apps opened',
+    'Jeux en double': 'Duplicate games', 'Recommandé': 'Recommended', 'Garder celui-ci': 'Keep this one', 'Jamais joué': 'Never played',
+    'Ce ne sont pas les mêmes jeux / garder les deux': 'Not the same game / keep both', 'Doublon suivant': 'Next duplicate', 'Terminé': 'Done',
+    'Plus aucun jeu en double 👍': 'No more duplicate games 👍', 'Choisir lequel garder →': 'Choose which one to keep →', 'taille inconnue': 'unknown size',
+    'Ces jeux sont installés sur plusieurs plateformes. Garde celui que tu utilises : l\'autre est masqué de ta bibliothèque, et tu peux le désinstaller pour libérer de la place.': 'These games are installed on several platforms. Keep the one you use: the other is hidden from your library, and you can uninstall it to free up space.',
+    // ---- game mode / do not disturb ----
+    'Mode « en jeu »': '“In-game” mode', 'Quand un jeu tourne, Linkgeek se réduit et met ses animations en pause pour laisser la mémoire et le processeur au jeu.': 'While a game runs, Linkgeek minimizes and pauses its animations to leave memory and CPU to the game.',
+    'Ne pas déranger': 'Do not disturb', 'Jamais': 'Never', 'Parties classées': 'Ranked games', 'En jeu': 'In game', 'Toujours': 'Always',
+    'Partie classée : ne pas déranger': 'Ranked: do not disturb', '✓ Partie classée : ne pas déranger': '✓ Ranked: do not disturb',
+    'Notifications d\'amis réactivées pour ce jeu': 'Friend notifications back on for this game',
+    // ---- login streak ----
+    'Série de connexion': 'Login streak', 'Nouvelle série !': 'New streak!', 'Bienvenue !': 'Welcome!',
+    // ---- stats export ----
+    'Exporter en image': 'Export as image', '📸 Exporter mes stats': '📸 Export my stats', 'Copier': 'Copy', 'Enregistrer l\'image': 'Save the image',
+    'Une image de tes stats, prête à partager sur les réseaux (format portrait 1080 × 1350).': 'An image of your stats, ready to share on social media (portrait 1080 × 1350).',
+    // ---- home editor ----
+    'Personnaliser l\'accueil': 'Customize home', 'Reprendre la partie': 'Resume playing', 'Les derniers jeux joués, en grand': 'Your latest games, big',
+    'Classement de la semaine': 'Weekly leaderboard', 'Les joueurs de Linkgeek qui ont le plus joué': 'The Linkgeek players who played the most',
+    'Tes 3 défis les plus avancés': 'Your 3 closest challenges', 'Un article à t\'offrir': 'An item to treat yourself', 'Tes derniers trophées et les plus proches': 'Your latest and closest trophies',
+    'Ton temps de jeu de la semaine': 'Your playtime this week', 'Roulette, niveau, défis du moment': 'Wheel, level, current challenges', 'Nouveautés': 'News',
+    'Les mises à jour récentes de tes jeux Steam': 'Recent updates of your Steam games', 'Recommandations': 'Recommendations', 'Des jeux Steam dans tes genres préférés': 'Steam games in your favorite genres',
+    'Favoris': 'Favorites', 'Tes jeux favoris': 'Your favorite games', 'Large': 'Wide', 'Moyen': 'Medium', 'Petit': 'Small', 'Affiché': 'Shown', 'Masqué': 'Hidden',
+    'Rétablir par défaut': 'Reset to default', 'Ton accueil est vide': 'Your home is empty', 'Pas encore de favori': 'No favorite yet',
+    'Affiche des blocs avec « Personnaliser l\'accueil ».': 'Show blocks with “Customize home”.', 'Clique sur l\'étoile d\'un jeu pour l\'ajouter ici.': 'Click a game\'s star to add it here.',
+    'Monte, descends ou masque les blocs. Les changements s\'appliquent tout de suite ; les blocs se rangent tout seuls, sans trou.': 'Move blocks up or down, or hide them. Changes apply right away; blocks arrange themselves with no gaps.',
+    // ---- profile: best cards next to the showcase ----
+    'Meilleures cartes': 'Best cards', 'Tes 2 cartes les plus rares, choisies automatiquement': 'Your 2 rarest cards, picked automatically',
+    'Aucun succès en vitrine.': 'No achievement on display.',
+    // ---- level 100 cap ----
+    'Niveau maximum': 'Maximum level', 'Niveau maximum atteint 👑': 'Maximum level reached 👑',
+    'Tu es au sommet ! Les défis te rapportent toujours des jetons.': 'You are at the top! Challenges still give you tokens.',
+    // ---- wheel reward pop-up ----
+    'Bravo !': 'Well done!', 'Jackpot !': 'Jackpot!', 'Super !': 'Great!', 'Appliquer le thème': 'Apply the theme',
+    'Ils sont déjà dans ton porte-monnaie : dépense-les dans la Boutique.': 'They are already in your wallet: spend them in the Shop.',
+    'Ajoutés à ton niveau.': 'Added to your level.', 'Jackpot ! Le thème est à toi pour toujours.': 'Jackpot! The theme is yours forever.',
+    'Tu avais déjà tous les thèmes : le jackpot est remplacé par des jetons.': 'You already had every theme: the jackpot is paid in tokens instead.',
     // ---- seasonal theme (Noël) ----
     'Noël': 'Christmas', 'Thème Noël': 'Christmas theme', 'Neige qui tombe, rouge velours, vert sapin et guirlandes dorées': 'Falling snow, velvet red, fir green and golden garlands',
     'Disponible encore': 'Still available for', 'Se dévoile dans': 'Revealed in', 'Plus disponible': 'No longer available', '🔒 Terminé': '🔒 Over',
@@ -635,11 +675,48 @@
     [/^(\d+) boosters? offerts?$/, '$1 gifted booster(s)'], [/^à ouvrir$/, 'to open'],
     [/^🎁 Ouvrir un autre booster offert \((\d+)\)$/, '🎁 Open another gifted booster ($1)'],
     [/^🃏 Cartes de (.+) : (.+)$/, '🃏 Cards from $1: $2'],
+    // wheel pop-up: "+15 XP", "Thème Sakura" (shop theme names only)
+    [/^\+(\d+) XP$/, '+$1 XP'],
+    [/^Meilleure carte (\d)$/, 'Best card $1'],
+    // uninstall / duplicates
+    [/^Désinstaller (.+) \?$/, 'Uninstall $1?'],
+    [/^Steam va ouvrir sa fenêtre de désinstallation pour (.+) : confirme-la dans Steam\.(.*)$/, (m, n, r) => `Steam will open its uninstall window for ${n}: confirm it in Steam.${trTail(r)}`],
+    [/^Epic Games s'ouvre sur ta bibliothèque : clique sur « … » sous (.+), puis « Désinstaller »\.(.*)$/, (m, n, r) => `Epic Games opens on your library: click “…” under ${n}, then “Uninstall”.${trTail(r)}`],
+    [/^Le programme de désinstallation de (.+) va s'ouvrir : suis ses étapes\.(.*)$/, (m, n, r) => `The uninstaller of ${n} will open: follow its steps.${trTail(r)}`],
+    [/^Windows s'ouvre sur « Applications installées » : cherche (.+), clique sur « … » puis « Désinstaller »\.(.*)$/, (m, n, r) => `Windows opens “Installed apps”: search for ${n}, click “…” then “Uninstall”.${trTail(r)}`],
+    [/^(\d+) jeux? en double$/, '$1 duplicate game(s)'], [/^installés? sur plusieurs plateformes$/, 'installed on several platforms'],
+    [/^✓ (.+) gardé$/, '✓ $1 kept'],
+    // do not disturb
+    [/^(.+) : pas de notification d'amis pendant tes parties(.*)$/, (m, n, r) => `${n}: no friend notifications during your games${r ? ' (choose “Ranked games” in Settings → General)' : ''}`],
+    // login streak
+    [/^(\d+) jours d'affilée !$/, '$1 days in a row!'], [/^Jour (\d)(\+?)$/, 'Day $1$2'],
+    [/^Série de connexion : jour (\d+)$/, 'Login streak: day $1'],
+    [/^Reviens demain pour$/, 'Come back tomorrow for'],
+    [/^\. Si tu rates un jour, la série repart du jour 1\.(?: Ton record : (\d+) jours\.)?$/, (m, b) => `. Miss a day and the streak starts again at day 1.${b ? ` Your best: ${b} days.` : ''}`],
+    [/^Tu es au bonus maximum : (\d+) jetons chaque jour tant que tu reviens\.(?: Ton record : (\d+) jours\.)?$/, (m, n, b) => `You are at the maximum bonus: ${n} tokens every day as long as you come back.${b ? ` Your best: ${b} days.` : ''}`],
+    [/^Coupe les notifications d'amis\. « Parties classées » : seulement pendant les jeux que tu as marqués comme tels \(page du jeu → « Partie classée »\)(?: · (\d+) jeux? marqués?)?\.$/, (m, n) => `Mutes friend notifications. “Ranked games”: only while games you marked as such are running (game page → “Ranked”)${n ? ` · ${n} game(s) marked` : ''}.`],
+    [/^(?:Les autres copies sont masquées|La copie (.+) est masquée) de ta bibliothèque\. Tu peux aussi (?:les|la) désinstaller pour libérer de la place\.$/, (m, s) => `${s ? `The ${s} copy is` : 'The other copies are'} hidden from your library. You can also uninstall ${s ? 'it' : 'them'} to free up space.`],
+    [/^🔥 Série de connexion :$/, '🔥 Login streak:'], [/^(\d+) jours?$/, '$1 day(s)'],
+    [/^· demain \+(\d+) jetons(.*)$/, (m, n, r) => `· tomorrow +${n} tokens${r.replace(/ · record (\d+)/, ' · best $1')}`],
+    [/^· \+(\d+) jetons aujourd'hui(.*)$/, (m, n, r) => `· +${n} tokens today${r.replace(/ · record (\d+)/, ' · best $1')}`],
+    // level 100 cap
+    [/^(.+) XP au total ·$/, '$1 total XP ·'],
+    [/^tu as atteint le niveau maximum \((\d+)\)$/, 'you reached the maximum level ($1)'],
+    [/^: les défis te rapportent toujours des jetons$/, ': challenges still give you tokens'],
+    [/^Niveau invalide pour « (.+) » \(entre 1 et (\d+)\)$/, 'Invalid level for "$1" (between 1 and $2)'],
+    [/^Thème (Néon|Océan|Forêt|Braise|Sakura|Synthwave|Or royal|Matrix|Aurore boréale|Cyberpunk|Galaxie|Holographique)$/, (m, n) => `${tr(n)} theme`],
   ];
 
   const MONTHS = { janvier: 'January', février: 'February', mars: 'March', avril: 'April', mai: 'May', juin: 'June', juillet: 'July', août: 'August', septembre: 'September', octobre: 'October', novembre: 'November', décembre: 'December' };
   const DAYS = { lundi: 'Monday', mardi: 'Tuesday', mercredi: 'Wednesday', jeudi: 'Thursday', vendredi: 'Friday', samedi: 'Saturday', dimanche: 'Sunday' };
   const UNITS = [[/\bMo\b/g, 'MB'], [/\bGo\b/g, 'GB'], [/\bTo\b/g, 'TB'], [/\bKo\b/g, 'KB'], [/\bpts\b/g, 'pts']];
+
+  /** End of the uninstall confirmation: " Ton temps de jeu … gardés dans Linkgeek. Cela libérera environ 35 Go." */
+  function trTail(r) {
+    if (!r) return '';
+    return r.replace(' Ton temps de jeu et tes statistiques sont gardés dans Linkgeek.', ' Your playtime and stats stay in Linkgeek.')
+      .replace(/ Cela libérera environ (.+)\.$/, (m, s) => ` This will free about ${tr(s)}.`);
+  }
 
   function tr(s) {
     if (!s) return s;

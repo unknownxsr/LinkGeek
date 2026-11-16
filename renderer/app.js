@@ -342,28 +342,100 @@ function viewHome() {
   state.heroList = heroGames(games, recent);
   if (!(state.heroIdx < state.heroList.length)) state.heroIdx = 0;
 
-  // Dashboard: rows of widgets; every widget in a row stretches to the row height (no gaps)
+  // Dashboard: the blocks in the order chosen by the player, packed in rows of 3 columns;
+  // the last block of a row widens to fill it, so there is never a hole between widgets
+  const rows = homeRows(homeLayout().filter((b) => !b.hidden));
   return `
   <div class="page">
-    <section class="hero">${heroInner(state.heroList[state.heroIdx], state.heroIdx, state.heroList.length)}</section>
+    <div class="home-tools"><button class="ghost sm" data-home-edit title="Déplacer ou masquer les blocs de l'accueil">${I.edit}Personnaliser l'accueil</button></div>
     <div class="dash">
-      <div class="dash-row r-2-1">
-        ${weeklyBoardSection()}
-        ${homeFriendsWidget()}
-      </div>
-      <div class="dash-row r-2-1">
-        ${homeChallengesWidget()}
-        ${homeShopWidget()}
-      </div>
-      <div class="dash-row r-1-1-1">
-        ${homeAchWidget()}
-        ${homeStatsWidget(games)}
-        ${infoPanel()}
-      </div>
-      ${recentNewsSection()}
+      ${rows.map((row) => `<div class="dash-row g3">${row.map(({ id, span }) => `<div class="dash-cell" style="grid-column: span ${span}">${HOME_BLOCKS[id].html(games)}</div>`).join('')}</div>`).join('')}
+      ${rows.length ? '' : '<div class="panel w-empty" style="padding:40px"><b>Ton accueil est vide</b><span>Affiche des blocs avec « Personnaliser l\'accueil ».</span></div>'}
     </div>
   </div>`;
 }
+
+/* ---- Home blocks: what the player can move or hide ("Personnaliser l'accueil") ---- */
+const HOME_BLOCKS = {
+  hero: { label: 'Reprendre la partie', desc: 'Les derniers jeux joués, en grand', span: 3,
+    html: () => `<section class="hero">${heroInner(state.heroList[state.heroIdx], state.heroIdx, state.heroList.length)}</section>` },
+  board: { label: 'Classement de la semaine', desc: 'Les joueurs de Linkgeek qui ont le plus joué', span: 2, html: () => weeklyBoardSection() },
+  friends: { label: 'Amis', desc: 'Qui est en ligne', span: 1, html: () => homeFriendsWidget() },
+  chal: { label: 'Défis', desc: 'Tes 3 défis les plus avancés', span: 2, html: () => homeChallengesWidget() },
+  shop: { label: 'Boutique', desc: 'Un article à t\'offrir', span: 1, html: () => homeShopWidget() },
+  ach: { label: 'Succès', desc: 'Tes derniers trophées et les plus proches', span: 1, html: () => homeAchWidget() },
+  stats: { label: 'Statistiques', desc: 'Ton temps de jeu de la semaine', span: 1, html: (games) => homeStatsWidget(games) },
+  info: { label: 'À savoir', desc: 'Roulette, niveau, défis du moment', span: 1, html: () => infoPanel() },
+  news: { label: 'Nouveautés', desc: 'Les mises à jour récentes de tes jeux Steam', span: 3, html: () => recentNewsSection() },
+  reco: { label: 'Recommandations', desc: 'Des jeux Steam dans tes genres préférés', span: 3, off: true, html: () => recoSection() },
+  favs: { label: 'Favoris', desc: 'Tes jeux favoris', span: 3, off: true, html: () => homeFavsSection() },
+};
+const HOME_DEFAULT = ['hero', 'board', 'friends', 'chal', 'shop', 'ach', 'stats', 'info', 'news', 'reco', 'favs'];
+/** Saved order + visibility, completed with blocks added in later versions. */
+function homeLayout() {
+  const saved = ((state.settings && state.settings.homeLayout) || []).filter((b) => HOME_BLOCKS[b.id]);
+  const out = saved.map((b) => ({ id: b.id, hidden: !!b.hidden }));
+  for (const id of HOME_DEFAULT) if (!out.some((b) => b.id === id)) out.push({ id, hidden: !!HOME_BLOCKS[id].off });
+  return out;
+}
+/** Packs the visible blocks into rows of 3 columns; the last one of each row fills what is left. */
+function homeRows(blocks) {
+  const rows = []; let row = []; let used = 0;
+  const close = () => { if (!row.length) return; row[row.length - 1].span += 3 - used; rows.push(row); row = []; used = 0; };
+  for (const b of blocks) {
+    const span = HOME_BLOCKS[b.id].span;
+    if (used + span > 3) close();
+    row.push({ id: b.id, span }); used += span;
+    if (used === 3) close();
+  }
+  close();
+  return rows;
+}
+function homeFavsSection() {
+  const favs = visibleGames().filter((g) => g.favorite);
+  return `<section class="section home-col">
+    <div class="section-head"><div><h2>Favoris</h2><div class="sub">${favs.length} jeu${favs.length > 1 ? 'x' : ''}</div></div>${favs.length > 6 ? '<button class="link" data-nav="library">Tout voir →</button>' : ''}</div>
+    ${favs.length ? `<div class="grid">${favs.slice(0, 6).map(gameCard).join('')}</div>` : '<div class="panel w-empty"><b>Pas encore de favori</b><span>Clique sur l\'étoile d\'un jeu pour l\'ajouter ici.</span></div>'}
+  </section>`;
+}
+async function saveHomeLayout(list) {
+  try { state.settings = await api.setSettings({ homeLayout: list }); } catch (e) { toast(errMsg(e), true); }
+  if (list && list.some((b) => b.id === 'reco' && !b.hidden) && !state.reco) loadReco();
+  if (state.view === 'home') render(true);
+}
+function homeEditModal() {
+  const root = $('#modal-root');
+  const draw = () => {
+    const list = homeLayout();
+    root.innerHTML = `<div class="modal-bg"><div class="modal he-modal">
+      <div class="ep-head"><h2>${I.edit}Personnaliser l'accueil</h2><button class="ep-x" data-he="close" title="Fermer">✕</button></div>
+      <p class="dup-intro">Monte, descends ou masque les blocs. Les changements s'appliquent tout de suite ; les blocs se rangent tout seuls, sans trou.</p>
+      <div class="he-list">${list.map((b, i) => `<div class="he-item ${b.hidden ? 'off' : ''}">
+        <div class="he-arrows"><button data-he-up="${i}" ${i === 0 ? 'disabled' : ''} title="Monter">▲</button><button data-he-down="${i}" ${i === list.length - 1 ? 'disabled' : ''} title="Descendre">▼</button></div>
+        <div class="he-txt"><b>${esc(HOME_BLOCKS[b.id].label)}</b><small>${esc(HOME_BLOCKS[b.id].desc)}</small></div>
+        <span class="he-size">${HOME_BLOCKS[b.id].span === 3 ? 'Large' : HOME_BLOCKS[b.id].span === 2 ? 'Moyen' : 'Petit'}</span>
+        <button class="toggle ${b.hidden ? '' : 'on'}" data-he-toggle="${i}">${b.hidden ? I.eyeOff + 'Masqué' : I.eye + 'Affiché'}</button>
+      </div>`).join('')}</div>
+      <div class="row"><button class="ghost" data-he="reset">Rétablir par défaut</button><button class="primary" data-he="close">Terminé</button></div>
+    </div></div>`;
+  };
+  draw();
+  root.onclick = async (e) => {
+    const b = e.target.closest('[data-he],[data-he-up],[data-he-down],[data-he-toggle]');
+    if (!b) { if (e.target.classList.contains('modal-bg')) { root.innerHTML = ''; root.onclick = null; } return; }
+    const d = b.dataset;
+    if (d.he === 'close') { root.innerHTML = ''; root.onclick = null; return; }
+    const list = homeLayout();
+    if (d.he === 'reset') { await saveHomeLayout(null); return draw(); }
+    const i = Number(d.heUp ?? d.heDown ?? d.heToggle);
+    if (d.heUp !== undefined && i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]];
+    if (d.heDown !== undefined && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]];
+    if (d.heToggle !== undefined) list[i].hidden = !list[i].hidden;
+    await saveHomeLayout(list);
+    draw();
+  };
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-home-edit]')) homeEditModal(); });
 
 /* ---- Home widgets ---- */
 const homeWidget = (cls, title, sub, nav, body) => `<section class="section home-col w-${cls}">
@@ -554,7 +626,7 @@ setInterval(() => {
   const el = $('.hero');
   if (!el || state.view !== 'home') return;
   // paused while hovered / hidden / a dialog is open: push the deadline back
-  if (document.hidden || el.matches(':hover') || document.querySelector('#modal-root .modal')) { state.heroAt = (state.heroAt || Date.now()) + 500; return; }
+  if (document.hidden || state.inGame || el.matches(':hover') || document.querySelector('#modal-root .modal')) { state.heroAt = (state.heroAt || Date.now()) + 500; return; }
   if (Date.now() - (state.heroAt || 0) < HERO_MS - 100) return;
   showHero((state.heroIdx || 0) + 1);
 }, 500);
@@ -648,7 +720,8 @@ function infoSlides() {
   if (a) out.push({ icon: `<span class="info-trophy">${trophySvg(a.it.rarity, a.it.icon)}</span>`, cls: a.it.rarity, kicker: `Trophée ${a.next.name} · +${a.next.points} pts`, title: a.it.name, text: `${fmtAch(a.it.value, a.it.unit)} / ${fmtAch(a.next.goal, a.it.unit)} · encore ${fmtAch(Math.max(0, a.next.goal - a.it.value), a.it.unit)}`, pct: a.p, nav: 'achievements' });
   // level
   const lv = state.profile && state.profile.level;
-  if (lv) out.push({ icon: levelBadge(lv.level, 'sm'), cls: 'violet', kicker: `Niveau ${lv.level} · ${lv.rankName}`, title: `Encore ${(lv.needed - lv.into).toLocaleString('fr-FR')} XP pour le niveau ${lv.level + 1}`, text: lv.nextRank ? `Badge ${lv.nextRank.name} et son contour au niveau ${lv.nextRank.level}.` : 'Tu as atteint le rang le plus haut !', pct: pctOf(lv.into, lv.needed), nav: 'challenges' });
+  if (lv && lv.max) out.push({ icon: levelBadge(lv.level, 'sm'), cls: 'gold', kicker: `Niveau ${lv.level} · ${lv.rankName}`, title: 'Niveau maximum atteint 👑', text: 'Tu es au sommet ! Les défis te rapportent toujours des jetons.', pct: 100, nav: 'challenges' });
+  else if (lv) out.push({ icon: levelBadge(lv.level, 'sm'), cls: 'violet', kicker: `Niveau ${lv.level} · ${lv.rankName}`, title: `Encore ${(lv.needed - lv.into).toLocaleString('fr-FR')} XP pour le niveau ${lv.level + 1}`, text: lv.nextRank ? `Badge ${lv.nextRank.name} et son contour au niveau ${lv.nextRank.level}.` : 'Tu as atteint le rang le plus haut !', pct: pctOf(lv.into, lv.needed), nav: 'challenges' });
   // closest profile title
   const t = s && (s.titles || []).filter((x) => !x.unlockedAt && x.goal).sort((x, y) => pctOf(y.value, y.goal) - pctOf(x.value, x.goal))[0];
   if (t) out.push({ icon: '🏷️', cls: 'gold', kicker: 'Titre à débloquer', title: `« ${t.name} »`, text: t.desc || '', meta: `${t.value} / ${t.goal}`, pct: pctOf(t.value, t.goal), nav: 'shop' });
@@ -841,6 +914,7 @@ function viewLibrary() {
         <option value="added" ${state.sort === 'added' ? 'selected' : ''}>Ajouts récents</option>
       </select>
     </div>
+    ${(() => { const n = duplicateGroups().length; return n ? `<button class="dup-banner" data-dup-open>${I.layers}<span><b>${n} jeu${n > 1 ? 'x' : ''} en double</b> installé${n > 1 ? 's' : ''} sur plusieurs plateformes</span><i>Choisir lequel garder →</i></button>` : ''; })()}
     <div class="col-bar">
       <span class="col-label">${I.layers}Collections</span>
       ${Object.entries(state.collections).map(([id, c]) => {
@@ -880,6 +954,7 @@ function viewGame() {
             ${playButton(g)}
             <button class="btn-glass square ${g.favorite ? 'on' : ''}" data-fav="${esc(g.id)}" title="Favori">${I.star}</button>
             <button class="btn-glass square" data-folder="${esc(g.id)}" title="Ouvrir le dossier">${I.folder}</button>
+            <button class="btn-glass square danger" data-uninstall="${esc(g.id)}" title="Désinstaller">${I.trash}</button>
           </div>
         </div>
       </div>
@@ -942,6 +1017,8 @@ function viewGame() {
             <button data-cover="${esc(g.id)}">${I.image}Changer la jaquette</button>
             <button data-hide="${esc(g.id)}">${g.hidden ? I.eye : I.eyeOff}${g.hidden ? 'Afficher dans la bibliothèque' : 'Masquer de la bibliothèque'}</button>
             ${g.source === 'manual' ? `<button class="danger" data-remove="${esc(g.id)}">${I.trash}Retirer de Linkgeek</button>` : ''}
+            <button data-dnd-game="${esc(g.id)}" title="Pendant ce jeu, aucune notification d'amis (réglage « Ne pas déranger » → Parties classées)">${DND_ICON}${(state.settings && (state.settings.dndGames || []).includes(g.id)) ? '✓ Partie classée : ne pas déranger' : 'Partie classée : ne pas déranger'}</button>
+            <button class="danger" data-uninstall="${esc(g.id)}">${I.trash}Désinstaller…</button>
           </div>
         </div>
       </div>
@@ -1178,8 +1255,107 @@ function wrappedPeriods() {
   return list;
 }
 function wrappedButtons() {
-  return wrappedPeriods().map((p, i) => `<button class="${p.year ? 'btn-play' : 'btn-glass'} wrap-btn" data-wrapped="${i}"><span aria-hidden="true">🎁</span><span>${esc(p.label)}</span></button>`).join('');
+  return `<button class="btn-glass wrap-btn" data-stats-export><span aria-hidden="true">📸</span><span>Exporter en image</span></button>`
+    + wrappedPeriods().map((p, i) => `<button class="${p.year ? 'btn-play' : 'btn-glass'} wrap-btn" data-wrapped="${i}"><span aria-hidden="true">🎁</span><span>${esc(p.label)}</span></button>`).join('');
 }
+
+/* ---- Stats card to share (image drawn on a canvas: text and shapes only, so it can always be exported) ---- */
+function statsCardData() {
+  const games = visibleGames();
+  const t = totals(games);
+  const week = allSessions().filter((s) => s.end > Date.now() - 7 * 86400000).reduce((a, s) => a + (s.end - Math.max(s.start, Date.now() - 7 * 86400000)), 0);
+  const top = [...games].filter((g) => g.playtimeSec > 0).sort((a, b) => b.playtimeSec - a.playtimeSec).slice(0, 5);
+  const p = state.profile || {};
+  const a = state.ach || {};
+  const c = state.cards;
+  return {
+    name: p.name || 'Joueur', level: p.level ? p.level.level : 1, rank: p.level ? p.level.rankName : '',
+    title: p.title ? p.title.name : null,
+    hours: Math.round(t.time / 3600), games: t.count, size: t.size, weekH: Math.round(week / 360000) / 10,
+    ach: a.items ? `${a.items.filter((x) => x.tier >= 1 && x.kind !== 'ultimate').length}/${a.items.filter((x) => x.kind !== 'ultimate').length}` : null,
+    cards: c ? `${c.owned}/${c.total}` : null,
+    top: top.map((g) => ({ name: g.name, h: Math.round(g.playtimeSec / 3600), source: g.source })),
+  };
+}
+function drawStatsCard(cv, d) {
+  const x = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const F = '"Segoe UI", sans-serif';
+  const bg = x.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#0d0a22'); bg.addColorStop(0.5, '#171037'); bg.addColorStop(1, '#05222f');
+  x.fillStyle = bg; x.fillRect(0, 0, W, H);
+  const glow = (cx, cy, r, col) => { const g = x.createRadialGradient(cx, cy, 0, cx, cy, r); g.addColorStop(0, col); g.addColorStop(1, 'transparent'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
+  glow(W - 120, 90, 560, 'rgba(124,92,255,.42)'); glow(100, H - 80, 560, 'rgba(34,211,238,.3)');
+  const grad = x.createLinearGradient(80, 0, W - 80, 0); grad.addColorStop(0, '#a78bfa'); grad.addColorStop(1, '#22d3ee');
+  const fit = (s, max) => { let n = String(s); while (x.measureText(n).width > max && n.length > 2) n = n.slice(0, -1); return n === String(s) ? n : n.trim() + '…'; };
+  // header: level hexagon + name
+  const hx = 150, hy = 170, hr = 72;
+  x.beginPath(); for (let i = 0; i < 6; i++) { const an = Math.PI / 3 * i - Math.PI / 2; x[i ? 'lineTo' : 'moveTo'](hx + hr * Math.cos(an), hy + hr * Math.sin(an)); } x.closePath();
+  x.fillStyle = grad; x.fill();
+  x.fillStyle = '#fff'; x.font = `900 ${d.level >= 100 ? 50 : 58}px ${F}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(d.level), hx, hy + 2);
+  x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  x.fillStyle = 'rgba(255,255,255,.65)'; x.font = `700 28px ${F}`; x.fillText('MES STATS LINKGEEK', 260, 130);
+  x.fillStyle = '#fff'; x.font = `800 64px ${F}`; x.fillText(fit(d.name, W - 340), 260, 198);
+  x.fillStyle = 'rgba(255,255,255,.7)'; x.font = `600 30px ${F}`; x.fillText(fit(`Niveau ${d.level} · ${d.rank}${d.title ? ` · « ${d.title} »` : ''}`, W - 340), 260, 244);
+  // big number
+  x.fillStyle = grad; x.font = `900 200px ${F}`;
+  const hs = d.hours.toLocaleString('fr-FR');
+  x.fillText(hs, 74, 470);
+  const w = x.measureText(hs).width;
+  x.fillStyle = '#fff'; x.font = `700 54px ${F}`; x.fillText('heures de jeu', 96 + w, 460);
+  // tiles
+  const tiles = [['Jeux', String(d.games)], ['Cette semaine', `${String(d.weekH).replace('.', ',')} h`], ['Succès', d.ach || '—'], ['Cartes', d.cards || '—']];
+  tiles.forEach(([k, v], i) => {
+    const tx = 80 + (i % 2) * 470, ty = 530 + Math.floor(i / 2) * 150;
+    x.fillStyle = 'rgba(255,255,255,.07)'; x.beginPath(); x.roundRect(tx, ty, 450, 130, 24); x.fill();
+    x.fillStyle = 'rgba(255,255,255,.6)'; x.font = `600 26px ${F}`; x.fillText(k.toUpperCase(), tx + 32, ty + 48);
+    x.fillStyle = '#fff'; x.font = `800 48px ${F}`; x.fillText(v, tx + 32, ty + 104);
+  });
+  // top games
+  const ty0 = 870;
+  x.fillStyle = '#fff'; x.font = `800 40px ${F}`; x.fillText('Mes jeux les plus joués', 80, ty0);
+  const max = Math.max(1, ...d.top.map((g) => g.h));
+  d.top.forEach((g, i) => {
+    const y = ty0 + 40 + i * 74;
+    x.fillStyle = 'rgba(255,255,255,.06)'; x.beginPath(); x.roundRect(80, y, 920, 60, 16); x.fill();
+    x.fillStyle = 'rgba(167,139,250,.28)'; x.beginPath(); x.roundRect(80, y, Math.max(60, 920 * (g.h / max)), 60, 16); x.fill();
+    x.fillStyle = grad; x.font = `900 32px ${F}`; x.fillText(String(i + 1), 104, y + 41);
+    x.fillStyle = '#fff'; x.font = `600 30px ${F}`; x.fillText(fit(g.name, 640), 150, y + 40);
+    x.fillStyle = 'rgba(255,255,255,.8)'; x.textAlign = 'right'; x.fillText(`${g.h.toLocaleString('fr-FR')} h`, 980, y + 40); x.textAlign = 'left';
+  });
+  if (!d.top.length) { x.fillStyle = 'rgba(255,255,255,.6)'; x.font = `500 30px ${F}`; x.fillText('Pas encore de temps de jeu enregistré.', 80, ty0 + 70); }
+  x.fillStyle = 'rgba(255,255,255,.5)'; x.font = `600 26px ${F}`;
+  x.fillText(new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }), 80, H - 50);
+  x.textAlign = 'right'; x.fillText('linkgeek', W - 80, H - 50); x.textAlign = 'left';
+}
+function statsExportModal() {
+  const d = statsCardData();
+  const root = $('#modal-root');
+  root.innerHTML = `<div class="modal-bg"><div class="modal sx-modal">
+    <div class="ep-head"><h2>📸 Exporter mes stats</h2><button class="ep-x" data-sx="close" title="Fermer">✕</button></div>
+    <p class="dup-intro">Une image de tes stats, prête à partager sur les réseaux (format portrait 1080 × 1350).</p>
+    <canvas class="sx-canvas" width="1080" height="1350"></canvas>
+    <div class="row"><button class="ghost" data-sx="copy">Copier</button><button class="primary" data-sx="save">Enregistrer l'image</button></div>
+  </div></div>`;
+  const cv = root.querySelector('.sx-canvas');
+  drawStatsCard(cv, d);
+  root.onclick = async (e) => {
+    const b = e.target.closest('[data-sx]');
+    if (!b) { if (e.target.classList.contains('modal-bg')) root.innerHTML = ''; return; }
+    const a = b.dataset.sx;
+    if (a === 'close') { root.innerHTML = ''; return; }
+    const url = cv.toDataURL('image/png');
+    try {
+      if (a === 'save') { const f = await api.saveImage(url, `Linkgeek-stats-${d.name}`); if (f) toast('Image enregistrée'); }
+      if (a === 'copy') { await api.copyImage(url); toast('Image copiée : colle-la où tu veux (Ctrl+V)'); }
+    } catch (err) { toast(errMsg(err), true); }
+  };
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-stats-export]')) return;
+  if (!state.cards) api.getCards().then((r) => { state.cards = r; }).catch(() => {}).finally(statsExportModal);
+  else statsExportModal();
+});
 function recapData(p) {
   const ss = allSessions().filter((s) => s.end > p.from && s.start < p.to).map((s) => ({ ...s, start: Math.max(s.start, p.from), end: Math.min(s.end, p.to) }));
   const per = {};
@@ -1469,19 +1645,21 @@ function viewProfile() {
           <div class="pf-name-wrap">
             <h1 class="pf-name-txt" title="${esc(p.name)}">${esc(p.name)}</h1>
             ${p.level ? `<button class="pf-badge" data-nav="challenges" title="Voir mes défis">${levelBadge(p.level.level, 'lg')}</button>` : ''}
-            ${p.admin ? adminTag(true) : ''}
-            ${p.ultimate ? ultimateBadge(true) : ''}
           </div>
           ${p.title ? `<button class="pf-title" data-edit-profile title="Changer de titre">${titleChip(p.title.name, true)}</button>` : ''}
           ${p.level ? levelBar(p.level) : ''}
           <div class="pf-sub">
             ${memberLine(p)}
+            ${p.admin ? adminTag(true) : ''}
+            ${p.ultimate ? ultimateBadge(true) : ''}
             ${socialIcons(p.socials, false)}
-            ${p.steamName && p.steamName !== p.name ? `<span>Nom Steam : ${esc(p.steamName)}</span>` : ''}
           </div>
         </div>
       </div>
-      <button class="pf-edit" data-edit-profile title="Modifier la photo, le pseudo, le titre, le contour, les réseaux et les jeux préférés">${I.edit}<span>Modifier le profil</span></button>
+      <div class="pf-actions">
+        <button class="pf-edit" data-pf-preview title="Voir ton profil comme tes amis le voient quand ils cliquent sur toi">${I.eye}<span>Aperçu</span></button>
+        <button class="pf-edit" data-edit-profile title="Modifier la photo, le pseudo, le titre, le contour, les réseaux et les jeux préférés">${I.edit}<span>Modifier le profil</span></button>
+      </div>
       <div class="pf-stats five">
         <div><b>${fmtHours(t.time)}</b><span>de jeu</span></div>
         <div><b>${t.count}</b><span>jeux installés</span></div>
@@ -1550,14 +1728,36 @@ function socialIcons(socials, editable = false) {
   return `<span class="socials">${icons}<button class="soc edit" data-edit-socials title="${icons ? 'Modifier mes réseaux' : 'Ajouter mes réseaux (Discord, Twitch, TikTok)'}">${icons ? I.edit : '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>'}${icons ? '' : '<span>Réseaux</span>'}</button></span>`;
 }
 
-/* ---- Profile: 5 achievements on display (chosen in "Modifier le profil") ---- */
+/* ---- Profile: 3 achievements on display (chosen in "Modifier le profil") + my 2 best cards ---- */
 function showcaseMedal(s, size = '') {
   return `<div class="sc-trophy ${size}">${trophySvg(troArt(s), s.icon)}</div>`;
 }
+const CARD_RANK = { legendary: 3, epic: 2, rare: 1, common: 0 };
+/** Full card objects for [{ id, holo }] (needs the catalogue in state.cards). */
+function cardsFromRefs(refs) {
+  const cat = state.cards && state.cards.cards;
+  if (!cat) return [];
+  return (refs || []).map((r) => { const c = r && cat.find((x) => x.id === r.id); return c ? { ...c, holo: r.holo ? 1 : 0, n: 1 } : null; }).filter(Boolean);
+}
+/** My 2 best cards, from my collection (rarest first, holo first). */
+function myBestCards() {
+  const c = state.cards;
+  if (!c) return cardsFromRefs((state.profile && state.profile.bestCards) || []);
+  return c.cards.filter((x) => x.n > 0)
+    .sort((a, b) => CARD_RANK[b.rarity] - CARD_RANK[a.rarity] || (b.holo > 0) - (a.holo > 0) || b.n - a.n || a.num - b.num)
+    .slice(0, 2).map((x) => ({ ...x, holo: x.holo > 0 ? 1 : 0, n: 1 }));
+}
 function showcaseSection(list) {
-  const slots = list || [null, null, null, null, null];
+  if (!state.cards) loadCards();
+  const slots = Array.from({ length: 3 }, (_, i) => (list && list[i]) || null);
+  const best = myBestCards();
+  const cardSlot = (c, i) => (c
+    ? `<button class="sc-slot sc-card filled r-${esc(c.rarity)}" data-ach-tab="cards" data-nav="achievements" title="${esc(c.name)} · ${esc(CARD_RAR[c.rarity].name)}${c.holo ? ' · holographique' : ''}"><div class="sc-card-in">${tradingCard(c, { noCount: true })}</div></button>`
+    : `<button class="sc-slot sc-card empty" data-ach-tab="cards" data-nav="achievements" title="Ouvrir des boosters">
+        <span class="plus">${CARD_ICON}</span><span>Meilleure carte ${i + 1}</span></button>`);
   return `<section class="section">
-    <div class="section-head"><div><h2>Succès en vitrine</h2><div class="sub">Tes succès préférés, visibles par tes amis · à choisir avec « Modifier le profil »</div></div></div>
+    <div class="section-head sc-heads"><div><h2>Succès en vitrine</h2><div class="sub">Tes succès préférés, visibles par tes amis · à choisir avec « Modifier le profil »</div></div>
+      <div class="sc-cards-head"><h2>Meilleures cartes</h2><div class="sub">Tes 2 cartes les plus rares, choisies automatiquement</div></div></div>
     <div class="showcase">${slots.map((s, i) => s ? `
       <button class="sc-slot filled ${esc(s.rarity || rarityOfRank(s.tier))}" data-nav="achievements" title="${esc(s.desc || '')}">
         ${showcaseMedal(s, 'lg')}
@@ -1568,9 +1768,10 @@ function showcaseSection(list) {
       <button class="sc-slot empty" data-edit-profile title="Choisir un succès">
         <span class="plus"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
         <span>Emplacement ${i + 1}</span>
-      </button>`).join('')}</div>
+      </button>`).join('')}<span class="sc-sep"></span>${[0, 1].map((i) => cardSlot(best[i], i)).join('')}</div>
   </section>`;
 }
+const CARD_ICON = '<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>';
 
 /* ---- Profile: one window to edit everything ---- */
 async function editProfileModal() {
@@ -1579,7 +1780,7 @@ async function editProfileModal() {
   const p = state.profile || {};
   const unlockedAch = ((state.ach && state.ach.items) || []).filter((it) => it.tier >= 1)
     .sort((a, b) => (b.kind ? 1 : 0) - (a.kind ? 1 : 0) || b.tier - a.tier || a.name.localeCompare(b.name, 'fr'));
-  const curShow = Array.from({ length: 5 }, (_, i) => (p.showcase && p.showcase[i] ? p.showcase[i].key : ''));
+  const curShow = Array.from({ length: 3 }, (_, i) => (p.showcase && p.showcase[i] ? p.showcase[i].key : ''));
   const draft = {
     name: p.name || '',
     title: p.title ? p.title.key : '',
@@ -1987,10 +2188,30 @@ function leaderboard(list) {
 }
 
 /* ---- A friend's profile ---- */
-function friendProfileModal(uid) {
-  const f = (state.friends.friends || []).find((x) => x.uid === uid);
+/** « Aperçu »: my own profile card, exactly as my friends see it when they click on me. */
+async function myProfilePreview() {
+  let card = {};
+  try { card = await api.getMyCard(); } catch { /* shown without the card */ }
+  const p = state.profile || {};
+  const playing = state.games.find((g) => state.running.has(g.id));
+  const me = {
+    uid: 'me', preview: true, name: p.name || 'Joueur', photo: p.avatar || null, frame: p.frame || null,
+    level: p.level ? p.level.level : 1, admin: !!p.admin, title: p.title ? p.title.key : null,
+    joinedAt: p.joinedAt || null, member: p.member || null,
+    state: 'online', game: playing ? { id: playing.id, name: playing.name, source: playing.source } : null,
+    since: playing && state.runningSince ? state.runningSince[playing.id] : null,
+    card: { ...card, socials: p.socials && Object.keys(p.socials).length ? p.socials : card.socials },
+  };
+  friendProfileModal('me', me);
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-pf-preview]')) myProfilePreview(); });
+
+function friendProfileModal(uid, given = null) {
+  const f = given || (state.friends.friends || []).find((x) => x.uid === uid);
   if (!f) return;
   const c = f.card || {};
+  // their best cards are drawn from the card catalogue: load it once, then redraw
+  if (c.bestCards && !state.cards) api.getCards().then((r) => { state.cards = r; if ($('.modal.fp')) friendProfileModal(uid, given); }).catch(() => {});
   const s = friendState(f);
   const rank = rankOf(f.level || 1);
   const wk = currentWeekKey();
@@ -1998,19 +2219,30 @@ function friendProfileModal(uid) {
     ? `<img src="${esc(g.cover)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
     : `<span style="--h:${hue((g && g.name) || '?')}">${esc(initials((g && g.name) || '?'))}</span>`;
   const top5 = (c.top5 || []).filter(Boolean);
+  // banner: the one shared by their Linkgeek (same as their profile page); for an older Linkgeek,
+  // a blurred version of their favourite / most played game's cover; else a colour from their name
+  const wide = typeof c.banner === 'string' && c.banner.startsWith('https://') ? c.banner : null;
+  const tall = !wide && [top5[0] && top5[0].cover, c.top && c.top.cover].find((u) => typeof u === 'string' && u.startsWith('https://'));
+  const bannerArt = wide || tall;
+  const statusTxt = s === 'playing' ? `Joue à <b>${esc(f.game.name)}</b>${f.since ? ' · ' + esc(fmtSince(f.since)) : ''}` : s === 'offline' ? (f.lastSeen ? 'Vu ' + esc(fmtAgo(f.lastSeen).toLowerCase()) : 'Hors ligne') : STATUS[s].label;
   const root = $('#modal-root');
-  root.innerHTML = `<div class="modal-bg"><div class="modal fp">
+  root.innerHTML = `<div class="modal-bg"><div class="modal fp" style="--h:${hue(f.name)}">
+    ${f.preview ? `<div class="fp-preview-tag">${I.eye}<span>Aperçu : c'est ce que voient tes amis en cliquant sur toi</span></div>` : ''}
+    <div class="fp-banner ${bannerArt ? (wide ? 'wide' : 'tall') : 'none'}">
+      ${bannerArt ? `<img src="${esc(bannerArt)}" alt="" referrerpolicy="no-referrer">` : ''}
+      <div class="fp-banner-fade"></div>
+    </div>
     <button class="fp-close" data-m="close" title="Fermer">✕</button>
     <div class="fp-head">
-      ${friendAvatar(f, 'xl')}
-      <div>
-        <div class="f-name fp-name"><b>${esc(f.name)}</b>${levelBadge(f.level || 1, 'md')}${f.admin ? adminTag(true) : ''}${c.ach && c.ach.ultimate ? ultimateBadge(true) : ''}</div>
+      <div class="fp-ava">${friendAvatar(f, 'xl')}</div>
+      <div class="fp-id">
+        <div class="f-name fp-name"><b>${esc(f.name)}</b>${levelBadge(f.level || 1, 'md')}</div>
         ${f.title && titleName(f.title) ? titleChip(titleName(f.title)) : ''}
         <div class="fp-sub">Niveau ${f.level || 1} · ${esc(rank.name)}</div>
-        <div class="fp-meta">${memberLine({ joinedAt: f.joinedAt, member: f.member })}${socialIcons(c.socials)}</div>
-        <div class="f-status ${STATUS[s].cls}">${s === 'playing' ? `Joue à <b>${esc(f.game.name)}</b>${f.since ? ' · ' + esc(fmtSince(f.since)) : ''}` : s === 'offline' ? (f.lastSeen ? 'Vu ' + esc(fmtAgo(f.lastSeen).toLowerCase()) : 'Hors ligne') : STATUS[s].label}</div>
       </div>
+      <div class="fp-pill ${STATUS[s].cls}"><i></i><span>${statusTxt}</span></div>
     </div>
+    <div class="fp-meta">${memberLine({ joinedAt: f.joinedAt, member: f.member })}${f.admin ? adminTag(true) : ''}${c.ach && c.ach.ultimate ? ultimateBadge(true) : ''}${socialIcons(c.socials)}</div>
     ${f.card ? `
     <div class="fp-kpis">
       <div><span>Cette semaine</span><b>${c.week === wk ? String(c.weekHours || 0).replace('.', ',') : 0} h</b></div>
@@ -2023,7 +2255,15 @@ function friendProfileModal(uid) {
       <div>${I.calendar}<span>Série de jours joués</span><b>${c.records.bestStreak || 0} jour${c.records.bestStreak > 1 ? 's' : ''}</b></div>
       <div>${I.trophy}<span>Jeu du mois</span><b title="${esc(c.records.monthGame || '')}">${esc(c.records.monthGame || '—')}</b></div>
     </div>` : ''}
-    ${Object.values(c.showcase || {}).filter(Boolean).length ? `<div class="fp-show"><span class="fp-show-l">Succès en vitrine</span><div>${Object.values(c.showcase).filter(Boolean).map((sc) => `<div class="fp-show-it" title="${esc(sc.name)}">${showcaseMedal(sc)}<b>${esc(sc.name)}</b></div>`).join('')}</div></div>` : ''}
+    ${(() => {
+      const shows = Object.values(c.showcase || {}).filter(Boolean).slice(0, 3);
+      const best = cardsFromRefs(Object.values(c.bestCards || {}));
+      if (!shows.length && !best.length) return '';
+      return `<div class="fp-show ${best.length ? 'with-cards' : ''}">
+        <div class="fp-show-part"><span class="fp-show-l">Succès en vitrine</span><div class="fp-show-row">${shows.length ? shows.map((sc) => `<div class="fp-show-it" title="${esc(sc.name)}">${showcaseMedal(sc)}<b>${esc(sc.name)}</b></div>`).join('') : '<p class="fp-empty">Aucun succès en vitrine.</p>'}</div></div>
+        ${best.length ? `<div class="fp-show-part cards"><span class="fp-show-l">Meilleures cartes</span><div class="fp-show-row">${best.map((x) => `<div class="fp-card" title="${esc(x.name)}">${tradingCard(x, { noCount: true })}</div>`).join('')}</div></div>` : ''}
+      </div>`;
+    })()}
     ${c.top ? `<div class="fp-top">
       <div class="fp-cover">${cover(c.top)}</div>
       <div><span>Jeu le plus joué</span><b>${esc(c.top.name)}</b><small>${String(c.top.hours).replace('.', ',')} h de jeu</small></div>
@@ -2048,6 +2288,100 @@ function friendActivityToast(a) {
   $('#toasts').appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 5200);
   setTimeout(() => t.remove(), 5600);
+}
+
+/* ---- Same game installed on two platforms ---- */
+/** Name without ™/®, edition words and punctuation: "Cities: Skylines II - PC Edition" = "citiesskylinesii". */
+const dupKey = (name) => String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[™®©]/g, '').replace(/\b(pc|windows|xbox|steam|epic|game of the year|goty|definitive|deluxe|standard|complete|for windows( 10)?|edition)\b/g, '')
+  .replace(/[^a-z0-9]+/g, '');
+function dupIgnored() { try { return JSON.parse(localStorage.getItem('lg-dup-ignored') || '[]'); } catch { return []; } }
+/** Groups of 2+ visible copies of the same game, each from a different platform. */
+function duplicateGroups() {
+  const ignored = new Set(dupIgnored());
+  const by = new Map();
+  for (const g of state.games.filter((x) => !x.hidden && x.source !== 'manual')) {
+    const k = dupKey(g.name);
+    if (k.length < 3) continue;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(g);
+  }
+  return [...by.entries()].filter(([k, l]) => !ignored.has(k) && new Set(l.map((g) => g.source)).size > 1)
+    .map(([key, games]) => ({ key, games: [...games].sort((a, b) => (b.playtimeSec || 0) - (a.playtimeSec || 0) || (b.lastPlayed || 0) - (a.lastPlayed || 0)) }));
+}
+function duplicatesModal() {
+  const groups = duplicateGroups();
+  const root = $('#modal-root');
+  if (!groups.length) { root.innerHTML = ''; return toast('Plus aucun jeu en double 👍'); }
+  root.innerHTML = `<div class="modal-bg"><div class="modal dup-modal">
+    <div class="ep-head"><h2>${I.layers}Jeux en double</h2><button class="ep-x" data-dup="close" title="Fermer">✕</button></div>
+    <p class="dup-intro">Ces jeux sont installés sur plusieurs plateformes. Garde celui que tu utilises : l'autre est masqué de ta bibliothèque, et tu peux le désinstaller pour libérer de la place.</p>
+    ${groups.map((gr) => `<div class="dup-group">
+      <b class="dup-name">${esc(gr.games[0].name)}</b>
+      <div class="dup-list">${gr.games.map((g, i) => `<div class="dup-item ${i === 0 ? 'best' : ''}">
+        <span class="dot ${esc(g.source)}"></span>
+        <div class="dup-info"><b>${esc((SOURCES[g.source] || {}).label || g.sourceLabel || g.source)}</b><small>${g.playtimeSec ? esc(playLabel(g)) : 'Jamais joué'}${g.lastPlayed ? ` · ${esc(fmtAgo(g.lastPlayed))}` : ''}${g.sizeBytes ? ` · ${fmtSize(g.sizeBytes)}` : ''}</small></div>
+        ${i === 0 ? '<span class="dup-reco">Recommandé</span>' : ''}
+        <button class="${i === 0 ? 'btn-play sm' : 'ghost sm'}" data-dup-keep="${esc(g.id)}" data-dup-group="${esc(gr.key)}">Garder celui-ci</button>
+      </div>`).join('')}</div>
+      <button class="link dup-ignore" data-dup-ignore="${esc(gr.key)}">Ce ne sont pas les mêmes jeux / garder les deux</button>
+    </div>`).join('')}
+  </div></div>`;
+  root.onclick = async (e) => {
+    const b = e.target.closest('[data-dup],[data-dup-keep],[data-dup-ignore],[data-dup-uninstall]');
+    if (!b) { if (e.target.classList.contains('modal-bg')) root.innerHTML = ''; return; }
+    const d = b.dataset;
+    if (d.dup === 'close') { root.innerHTML = ''; return render(true); }
+    if (d.dupIgnore) {
+      try { localStorage.setItem('lg-dup-ignored', JSON.stringify([...dupIgnored(), d.dupIgnore])); } catch { /* ignore */ }
+      render(true); return duplicatesModal();
+    }
+    if (d.dupKeep) {
+      const gr = duplicateGroups().find((x) => x.key === d.dupGroup);
+      const others = gr ? gr.games.filter((g) => g.id !== d.dupKeep) : [];
+      for (const o of others) await api.toggleHidden(o.id);
+      await reload(); render(true);
+      const kept = byId(d.dupKeep);
+      // offer to uninstall the copies that were just hidden
+      root.innerHTML = `<div class="modal-bg"><div class="modal dup-modal">
+        <div class="ep-head"><h2>✓ ${esc(kept ? kept.name : '')} gardé</h2><button class="ep-x" data-dup="close" title="Fermer">✕</button></div>
+        <p class="dup-intro">${others.length > 1 ? 'Les autres copies sont masquées' : `La copie ${esc((SOURCES[others[0].source] || {}).label || '')} est masquée`} de ta bibliothèque. Tu peux aussi ${others.length > 1 ? 'les' : 'la'} désinstaller pour libérer de la place.</p>
+        <div class="dup-list">${others.map((o) => `<div class="dup-item"><span class="dot ${esc(o.source)}"></span><div class="dup-info"><b>${esc((SOURCES[o.source] || {}).label || o.source)}</b><small>${o.sizeBytes ? fmtSize(o.sizeBytes) : 'taille inconnue'}</small></div><button class="ghost sm danger" data-dup-uninstall="${esc(o.id)}">${I.trash}Désinstaller</button></div>`).join('')}</div>
+        <div class="row"><button class="primary" data-dup="next">${duplicateGroups().length ? 'Doublon suivant' : 'Terminé'}</button></div>
+      </div></div>`;
+      return;
+    }
+    if (d.dupUninstall) return uninstallFlow(d.dupUninstall, () => duplicatesModal());
+    if (d.dup === 'next') return duplicatesModal();
+  };
+}
+
+document.addEventListener('click', (e) => { if (e.target.closest('[data-dup-open]')) duplicatesModal(); });
+
+/* ---- Uninstall a game from Linkgeek (opens the right uninstaller) ---- */
+const UNINSTALL_HOW = {
+  steam: (n) => `Steam va ouvrir sa fenêtre de désinstallation pour ${n} : confirme-la dans Steam.`,
+  epic: (n) => `Epic Games s'ouvre sur ta bibliothèque : clique sur « … » sous ${n}, puis « Désinstaller ».`,
+  program: (n) => `Le programme de désinstallation de ${n} va s'ouvrir : suis ses étapes.`,
+  windows: (n) => `Windows s'ouvre sur « Applications installées » : cherche ${n}, clique sur « … » puis « Désinstaller ».`,
+};
+function uninstallHowFor(g) {
+  if (g.source === 'steam' || g.source === 'epic') return g.source;
+  return g.uninstall ? 'program' : 'windows';
+}
+async function uninstallFlow(id, after) {
+  const g = byId(id);
+  if (!g) return;
+  const how = uninstallHowFor(g);
+  const ok = await confirmModal(`Désinstaller ${g.name} ?`,
+    `${UNINSTALL_HOW[how](g.name)} Ton temps de jeu et tes statistiques sont gardés dans Linkgeek.${g.sizeBytes ? ` Cela libérera environ ${fmtSize(g.sizeBytes)}.` : ''}`,
+    'Désinstaller');
+  if (!ok) return;
+  try {
+    await api.uninstallGame(id);
+    toast(how === 'steam' ? 'Fenêtre de désinstallation ouverte dans Steam' : how === 'epic' ? 'Bibliothèque Epic Games ouverte' : how === 'program' ? 'Désinstallation lancée' : 'Applications installées de Windows ouvertes');
+    if (after) after();
+  } catch (e) { toast(errMsg(e), true); }
 }
 
 function confirmModal(title, text, okLabel, danger = true) {
@@ -2155,7 +2489,7 @@ function onFriendsSnapshot(snap) {
   const prevReq = new Set((prev.requests || []).map((r) => r.uid));
   state.friends = snap;
   if (prev.status === 'online') {
-    for (const r of snap.requests || []) if (!prevReq.has(r.uid)) toast(`${r.name || 'Quelqu\'un'} veut t'ajouter en ami`);
+    for (const r of snap.requests || []) if (!prevReq.has(r.uid) && !state.dnd) toast(`${r.name || 'Quelqu\'un'} veut t'ajouter en ami`);
     // friends who start a game: see friendActivityToast (sent by the main process)
   }
   const typing = document.activeElement && ['f-code', 'f-q', 'pf-name', 'modal-input'].includes(document.activeElement.id);
@@ -2192,11 +2526,11 @@ function levelBadge(level, size = '', forceRank = null, locked = false) {
 }
 
 function levelBar(lv) {
-  const pct = Math.min(100, (lv.into / lv.needed) * 100);
-  return `<div class="lv-line">
+  const pct = lv.max ? 100 : Math.min(100, (lv.into / lv.needed) * 100);
+  return `<div class="lv-line ${lv.max ? 'max' : ''}">
     <span class="lv-rank r-${lv.rank}">${esc(lv.rankName)}</span>
     <div class="lv-track"><i class="r-${lv.rank}" style="width:${pct.toFixed(1)}%"></i></div>
-    <span class="lv-xp">${lv.into.toLocaleString('fr-FR')} / ${lv.needed.toLocaleString('fr-FR')} XP</span>
+    <span class="lv-xp">${lv.max ? 'Niveau maximum' : `${lv.into.toLocaleString('fr-FR')} / ${lv.needed.toLocaleString('fr-FR')} XP`}</span>
   </div>`;
 }
 
@@ -2252,7 +2586,8 @@ function viewChallenges() {
         <span class="lv-kicker">Badge ${esc(rank.name)}</span>
         <h2>Niveau ${lv.level}</h2>
         ${levelBar(lv)}
-        <div class="lv-meta">${lv.xp.toLocaleString('fr-FR')} XP au total · encore ${(lv.needed - lv.into).toLocaleString('fr-FR')} XP avant le niveau ${lv.level + 1}${lv.nextRank ? ` · prochain badge : <b>${esc(lv.nextRank.name)}</b> au niveau ${lv.nextRank.level}` : ''}</div>
+        <div class="lv-meta">${lv.max ? `${lv.xp.toLocaleString('fr-FR')} XP au total · <b>tu as atteint le niveau maximum (${lv.maxLevel || 100})</b> : les défis te rapportent toujours des jetons`
+          : `${lv.xp.toLocaleString('fr-FR')} XP au total · encore ${(lv.needed - lv.into).toLocaleString('fr-FR')} XP avant le niveau ${lv.level + 1}${lv.nextRank ? ` · prochain badge : <b>${esc(lv.nextRank.name)}</b> au niveau ${lv.nextRank.level}` : ''}`}</div>
       </div>
     </div>
     <div class="lv-ranks">${RANKS.map((r) => {
@@ -2369,6 +2704,7 @@ function viewShop() {
         <span>✓ Chaque défi terminé : 1 jeton pour ${s.rates.perXp} XP (un défi à 80 XP = ${Math.round(80 / s.rates.perXp)} jetons)</span>
         <span>⬆ Chaque nouveau niveau : 20 + 5 × le niveau (niveau 20 = 120 jetons)</span>
         <span>🔒 Thèmes rares dès le niveau ${((s.rarities || {}).rare || {}).minLevel || 15}, épiques dès le niveau ${((s.rarities || {}).epic || {}).minLevel || 40}</span>
+        ${s.login ? `<span class="ls-line">🔥 Série de connexion : <b>${s.login.streak} jour${s.login.streak > 1 ? 's' : ''}</b> · ${s.login.claimedToday ? `demain +${s.login.nextBonus} jetons` : `+${s.login.nextBonus} jetons aujourd'hui`}${s.login.best > s.login.streak ? ` · record ${s.login.best}` : ''}</span>` : ''}
       </div>
       <button class="ghost" data-nav="challenges">Voir mes défis</button>
     </div>
@@ -2539,18 +2875,27 @@ const WHEEL_POINTER = `<svg viewBox="0 0 36 46" aria-hidden="true"><defs>
   <path d="M18 44L4.5 17A14 14 0 1 1 31.5 17Z" fill="url(#wp-g)" stroke="#6b4604" stroke-width="1.2" stroke-linejoin="round"/>
   <circle cx="18" cy="14" r="6.5" fill="url(#wp-r)" stroke="#6b4604" stroke-width="1"/><circle cx="16" cy="12" r="2" fill="#fff" opacity=".8"/></svg>`;
 
+/** Middle angle (0 = top, clockwise) of a prize's slice. */
+function wheelMid(w, key) {
+  let a = 0;
+  for (const p of w.segments) { const span = p.pct * 3.6; if (p.key === key) return a + span / 2; a += span; }
+  return 0;
+}
 function wheelSection(s) {
   const w = s.wheel;
   const spinning = !!state.wheelSpinning;
   const left = Math.max(0, w.nextAt - Date.now());
   const wait = `${Math.floor(left / 3600000)} h ${String(Math.floor(left / 60000) % 60).padStart(2, '0')} min`;
   const last = state.wheelResult || (w.last && dayStr(w.last.at) === dayStr(Date.now()) ? w.last : null);
+  // after a restart, show the wheel stopped on today's prize (under the pointer)
+  if (state.wheelRot === undefined && last && last.key) state.wheelRot = (360 - wheelMid(w, last.key)) % 360;
+  const winKey = !spinning && last ? last.key : null;
   const lastTxt = (p) => (p.kind === 'theme' ? (p.theme ? `le thème ${p.theme.name}` : `${p.duplicate} jetons (tu avais déjà tous les thèmes)`) : prizeLabel(p));
   return `<section class="section">
     <div class="section-head"><div><h2>Roulette du jour</h2><div class="sub">Un tour gratuit chaque jour · remis à zéro à minuit</div></div></div>
     <div class="panel wheel-panel">
-      <div class="wheel-box ${w.free && !spinning ? 'ready' : ''} ${spinning ? 'spinning' : ''}">
-        <div class="wheel-rot" style="transform:rotate(${state.wheelRot || 0}deg)">${wheelSvg(w, !spinning && state.wheelResult ? state.wheelResult.key : null)}</div>
+      <div class="wheel-box ${w.free && !spinning ? 'ready' : ''} ${spinning ? 'spinning' : ''} ${winKey ? 'won' : ''}">
+        <div class="wheel-rot" style="transform:rotate(${state.wheelRot || 0}deg)">${wheelSvg(w, winKey)}</div>
         ${wheelFrame()}
         <div class="wheel-pointer">${WHEEL_POINTER}</div>
         <div class="wheel-hub">${COIN}</div>
@@ -2588,19 +2933,85 @@ async function spinWheel(btn) {
   const side = $('.wheel-side .wheel-go');
   if (side) { side.textContent = 'La roue tourne…'; side.classList.add('disabled'); }
   const box = $('.wheel-box');
-  if (box) { box.classList.remove('ready'); box.classList.add('spinning'); setTimeout(() => box.classList.remove('spinning'), 4300); }
+  if (box) {
+    box.classList.remove('ready', 'won'); box.classList.add('spinning');
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' }); // the whole wheel in view to watch it stop
+    setTimeout(() => box.classList.remove('spinning'), 4300);
+  }
   if (el) { el.classList.add('spin'); requestAnimationFrame(() => { el.style.transform = `rotate(${target}deg)`; }); }
-  await new Promise((res) => setTimeout(res, el ? 5200 : 0));
+  await new Promise((res) => setTimeout(res, el ? 5100 : 0));
+  // stopped: the pointer drops on the slice, which lights up, for a moment before the pop-up
   state.wheelSpinning = false;
   state.wheelResult = r.prize;
   state.shop = r.shop; state.profile = r.profile;
   if (r.challenges) { state.chal = r.challenges; setRanks(r.challenges.ranks); }
   render(true); renderSidebar();
-  const p = r.prize;
-  if (p.kind === 'coins') coinToast(p.n, 'Roulette du jour');
-  else if (p.kind === 'xp') toast(`Roulette du jour : +${p.n} XP`, false, true);
-  else if (p.theme) toast(`Jackpot ! Tu gagnes le thème ${p.theme.name} 🎉 Applique-le dans la liste des thèmes.`, false, true);
-  else coinToast(p.duplicate, 'Roulette : thème remplacé par des jetons');
+  const nb = $('.wheel-box');
+  if (nb) nb.classList.add('landed');
+  await new Promise((res) => setTimeout(res, 1100));
+  wheelPrizePopup(r.prize);
+}
+
+/* ---- Login streak: daily bonus for opening Linkgeek several days in a row ---- */
+async function claimLoginStreak() {
+  let r;
+  try { r = await api.claimLogin(); } catch { return; }
+  if (r.shop) { state.shop = { ...(state.shop || {}), ...r.shop }; renderSidebar(); if (state.view === 'shop' || state.view === 'home') render(true); }
+  if (!r.result) return;
+  const g = r.result;
+  // wait for any other pop-up (onboarding…) to be closed
+  const show = () => {
+    if ($('#modal-root .modal')) return setTimeout(show, 1500);
+    const root = $('#modal-root');
+    const days = g.bonuses.map((b, i) => {
+      const n = i + 1;
+      const cls = n < Math.min(g.streak, 7) ? 'done' : n === Math.min(g.streak, 7) ? 'now' : '';
+      return `<div class="ls-day ${cls}"><small>Jour ${n}${n === 7 ? '+' : ''}</small><b>${b}</b>${COIN}</div>`;
+    }).join('');
+    root.innerHTML = `<div class="modal-bg wp-bg"><div class="modal wp-modal streak">
+      <div class="wp-rays"></div>
+      <small class="wp-kicker">Série de connexion</small>
+      <div class="ls-flame">🔥<b>${g.streak}</b></div>
+      <h2>${g.streak === 1 ? (g.broken ? 'Nouvelle série !' : 'Bienvenue !') : `${g.streak} jours d'affilée !`}</h2>
+      <b class="wp-big">+${fmtCoins(g.bonus)} jetons</b>
+      <div class="ls-days">${days}</div>
+      <p>${g.streak >= 7 ? `Tu es au bonus maximum : ${g.bonus} jetons chaque jour tant que tu reviens.` : `Reviens demain pour <b>+${g.nextBonus} jetons</b>. Si tu rates un jour, la série repart du jour 1.`}${g.best > g.streak ? ` Ton record : ${g.best} jours.` : ''}</p>
+      <div class="row"><button class="primary" data-ls="ok">Super !</button></div>
+    </div></div>`;
+    root.onclick = (e) => { if (e.target.closest('[data-ls]') || e.target.classList.contains('modal-bg')) { root.innerHTML = ''; root.onclick = null; } };
+  };
+  setTimeout(show, 1200);
+}
+setInterval(() => { if (!document.hidden) claimLoginStreak(); }, 30 * 60000); // past midnight with Linkgeek open
+
+/** Pop-up with the prize just won. */
+function wheelPrizePopup(p) {
+  const root = $('#modal-root');
+  const theme = p.theme && state.shop && state.shop.themes.find((t) => t.id === p.theme.id);
+  let art; let big; let sub;
+  if (p.kind === 'coins') { art = `<div class="wp-coin">${COIN}</div>`; big = `+${fmtCoins(p.n)} jetons`; sub = 'Ils sont déjà dans ton porte-monnaie : dépense-les dans la Boutique.'; }
+  else if (p.kind === 'xp') { art = '<div class="wp-xp">XP</div>'; big = `+${p.n} XP`; sub = 'Ajoutés à ton niveau.'; }
+  else if (p.theme) { art = theme ? `<div class="wp-theme">${themePreview(theme)}</div>` : '<div class="wp-xp">★</div>'; big = `Thème ${p.theme.name}`; sub = 'Jackpot ! Le thème est à toi pour toujours.'; }
+  else { art = `<div class="wp-coin">${COIN}</div>`; big = `+${fmtCoins(p.duplicate)} jetons`; sub = 'Tu avais déjà tous les thèmes : le jackpot est remplacé par des jetons.'; }
+  const confetti = Array.from({ length: 28 }, (_, i) => `<i style="--i:${i};--x:${(Math.random() * 100).toFixed(1)}%;--d:${(Math.random() * 0.6).toFixed(2)}s;--h:${Math.floor(Math.random() * 360)}"></i>`).join('');
+  root.innerHTML = `<div class="modal-bg wp-bg"><div class="modal wp-modal ${p.kind === 'theme' ? 'jackpot' : p.kind}">
+    <div class="wp-confetti">${confetti}</div>
+    <div class="wp-rays"></div>
+    <small class="wp-kicker">Roulette du jour</small>
+    ${art}
+    <h2>${p.kind === 'theme' && p.theme ? 'Jackpot !' : 'Bravo !'}</h2>
+    <b class="wp-big">${esc(big)}</b>
+    <p>${esc(sub)}</p>
+    <div class="row">${p.theme ? `<button class="ghost" data-wp="close">Plus tard</button><button class="primary" data-wp="apply" data-theme-id="${esc(p.theme.id)}">Appliquer le thème</button>` : '<button class="primary" data-wp="close">Super !</button>'}</div>
+  </div></div>`;
+  root.onclick = async (e) => {
+    const b = e.target.closest('[data-wp]');
+    if (!b && !e.target.classList.contains('modal-bg')) return;
+    root.innerHTML = ''; root.onclick = null;
+    if (b && b.dataset.wp === 'apply') {
+      try { state.settings = await api.setSettings({ theme: b.dataset.themeId }); applyTheme(state.settings.theme); render(true); } catch (err) { toast(errMsg(err), true); }
+    }
+  };
 }
 
 /* ---- Profile titles ---- */
@@ -3029,7 +3440,7 @@ const CARD_BACK = `<div class="tcard back"><div class="tc-back"><div class="tcb-
 
 async function loadCards() {
   try { state.cards = await api.getCards(); } catch (e) { console.error(e); return; }
-  if ((state.view === 'achievements' && state.achTab === 'cards') || (state.view === 'settings' && state.settingsTab === 'admin')) render(true);
+  if ((state.view === 'achievements' && state.achTab === 'cards') || state.view === 'profile' || (state.view === 'settings' && state.settingsTab === 'admin')) render(true);
 }
 
 function viewCards() {
@@ -3373,6 +3784,9 @@ function settingsSection(s) {
         ${toggle('closeToTray', s.closeToTray, 'Réduire dans la zone de notification à la fermeture', 'La croix cache la fenêtre au lieu de quitter. Désactivé : fermer quitte Linkgeek (le suivi s\'arrête).')}
         ${toggle('weeklyBoard', s.weeklyBoard, 'Apparaître dans le classement général', 'Ton pseudo, ta photo, ton niveau et tes heures de jeu de la semaine sont visibles par tous les joueurs de Linkgeek sur l\'accueil.')}
         ${toggle('notifyFriends', s.notifyFriends, 'Prévenir quand un ami lance un jeu', '« Mirko vient de lancer Rocket League » : dans l\'app, ou en notification Windows si Linkgeek est en arrière-plan.')}
+        ${toggle('gameMode', s.gameMode, 'Mode « en jeu »', 'Quand un jeu tourne, Linkgeek se réduit et met ses animations en pause pour laisser la mémoire et le processeur au jeu.')}
+        <div class="set-row"><div><b>Ne pas déranger</b><span>Coupe les notifications d'amis. « Parties classées » : seulement pendant les jeux que tu as marqués comme tels (page du jeu → « Partie classée »)${(s.dndGames || []).length ? ` · ${s.dndGames.length} jeu${s.dndGames.length > 1 ? 'x' : ''} marqué${s.dndGames.length > 1 ? 's' : ''}` : ''}.</span></div>
+          <div class="segmented sm">${[['off', 'Jamais'], ['competitive', 'Parties classées'], ['playing', 'En jeu'], ['always', 'Toujours']].map(([k, l]) => `<button class="${s.dnd === k ? 'active' : ''}" data-setting="dnd" data-value="${k}">${l}</button>`).join('')}</div></div>
         <div class="set-row"><div><b>Langue</b><span>Langue de l'interface de Linkgeek.</span></div>
           <div class="segmented sm">${[['fr', 'Français'], ['en', 'English']].map(([k, l]) => `<button class="${s.language === k ? 'active' : ''}" data-setting="language" data-value="${k}">${l}</button>`).join('')}</div></div>
         <div class="set-row"><div><b>Revoir la présentation</b><span>Les 3 étapes affichées au premier lancement.</span></div><button class="ghost" data-onb="show">Revoir</button></div>
@@ -3440,7 +3854,7 @@ function adminSection(s) {
       <div class="set-row"><div><b>Ajouter ou retirer de l'XP</b><span>Montant en XP</span></div>
         <div class="adm-inline"><input id="adm-xp" type="number" min="1" step="50" value="500"><button class="ghost primary-soft" data-adm="xp-add">Ajouter</button><button class="ghost danger" data-adm="xp-remove">Retirer</button></div></div>
       <div class="set-row"><div><b>Fixer mon niveau</b><span>Remplace ton XP par le minimum de ce niveau</span></div>
-        <div class="adm-inline"><input id="adm-level" type="number" min="1" max="999" value="${lv ? lv.level : 1}"><button class="ghost primary-soft" data-adm="level">Appliquer</button></div></div>
+        <div class="adm-inline"><input id="adm-level" type="number" min="1" max="100" value="${lv ? lv.level : 1}"><button class="ghost primary-soft" data-adm="level">Appliquer</button></div></div>
       <div class="set-row"><div><b>Renouveler mes défis du jour</b><span>Tire 3 nouveaux défis (ceux déjà terminés restent comptés)</span></div><button class="ghost" data-adm="reroll">Renouveler</button></div>
     </div>
 
@@ -3454,7 +3868,7 @@ function adminSection(s) {
       </select></label>
       <label class="dim">Code ami<input id="adm-code" placeholder="ABCD-1234" maxlength="9" spellcheck="false" autocomplete="off"></label>
       <label>XP (négatif pour retirer)<input id="adm-gxp" type="number" step="50" placeholder="0"></label>
-      <label>Ou fixer le niveau<input id="adm-glevel" type="number" min="1" max="999" placeholder="facultatif"></label>
+      <label>Ou fixer le niveau<input id="adm-glevel" type="number" min="1" max="100" placeholder="facultatif"></label>
       <label>Jetons (négatif pour retirer)<input id="adm-gcoins" type="number" step="100" placeholder="0"></label>
       <label>Succès ou trophée<select id="adm-ach">${achOptions()}</select></label>
       <label>Palier<select id="adm-tier">${tierOptions('')}</select></label>
@@ -3474,7 +3888,7 @@ function adminSection(s) {
     <div class="adm-ranks">${RANKS.map((r, i) => `<div class="adm-rank">
       ${levelBadge(r.min, 'md', r)}
       <input data-rank-name="${i}" value="${esc(r.name)}" maxlength="20">
-      <label>Niveau<input data-rank-min="${i}" type="number" min="1" max="999" value="${r.min}" ${i === 0 ? 'disabled' : ''}></label>
+      <label>Niveau<input data-rank-min="${i}" type="number" min="1" max="100" value="${r.min}" ${i === 0 ? 'disabled' : ''}></label>
     </div>`).join('')}</div>
     <div class="set-actions"><button class="ghost primary-soft" data-adm="ranks-save">Enregistrer les rangs</button><button class="ghost" data-adm="ranks-reset">Rétablir les rangs d'origine</button></div>
 
@@ -3711,9 +4125,17 @@ function fxResize() {
   }
 }
 window.addEventListener('resize', () => { if (FX.canvas) fxResize(); });
+/* ---- Mode « en jeu » (sent by the main process when a game starts / stops) ---- */
+const DND_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M7.5 12h9"/></svg>';
+if (api.onGameMode) api.onGameMode((m) => {
+  state.inGame = !!m.on;
+  state.dnd = !!m.dnd;
+  document.documentElement.classList.toggle('in-game', state.inGame); // CSS pauses every animation
+});
+
 function fxFrame(t) {
   FX.raf = requestAnimationFrame(fxFrame);
-  if (document.hidden || t - FX.last < (FX.kind === 'matrix' ? 50 : 33)) return;
+  if (document.hidden || state.inGame || t - FX.last < (FX.kind === 'matrix' ? 50 : 33)) return;
   FX.last = t;
   const ctx = FX.canvas.getContext('2d');
   const d = FX.data;
@@ -3844,6 +4266,11 @@ async function settingsClick(t) {
       state.settings = await api.setSettings({ theme: d.themePick });
       return render(true);
     }
+    if (d.setting === 'dnd') {
+      state.settings = await api.setSettings({ dnd: d.value });
+      state.dnd = state.settings.dndActive;
+      return render(true);
+    }
     if (d.setting === 'language') {
       state.settings = await api.setSettings({ language: d.value });
       applyLanguage(state.settings.language);
@@ -3916,11 +4343,24 @@ async function settingsClick(t) {
 function render(keepScroll = false) {
   const main = $('#main');
   const scroll = main.scrollTop;
+  // never redraw the Boutique while the wheel turns (it would jump to its stop position)
+  if (state.view === 'shop' && state.wheelSpinning) { renderSidebar(); return; }
   const views = { shop: viewShop, home: viewHome, friends: viewFriends, challenges: viewChallenges, achievements: viewAchievements, library: viewLibrary, stats: viewStats, game: viewGame, profile: viewProfile, settings: viewSettings };
   $('#view').innerHTML = views[state.view]();
   renderSidebar();
   main.scrollTop = keepScroll ? scroll : 0;
+  updateStuckBar();
 }
+
+/** The library filter bar gets its blurred backdrop only once it sticks to the top. */
+function updateStuckBar() {
+  const t = document.querySelector('.toolbar');
+  if (!t) return;
+  const m = $('#main');
+  t.classList.toggle('stuck', m.scrollTop > 8 && t.getBoundingClientRect().top <= m.getBoundingClientRect().top + 1);
+}
+$('#main').addEventListener('scroll', updateStuckBar, { passive: true });
+window.addEventListener('resize', updateStuckBar);
 
 function go(view, gameId = null) {
   if (view === 'game') {
@@ -3933,7 +4373,7 @@ function go(view, gameId = null) {
   if (view === 'achievements') { loadAchievements(); if (state.achTab === 'cards') loadCards(); }
   if (view === 'shop') loadShop();
   if (view === 'game' && gameId) { state.newsOpen = null; loadNews(gameId); }
-  if (view === 'home') { loadRecentNews(); loadAchievements(); loadShop(); loadChallenges(); refreshStats(); if (!state.weeklyAt || Date.now() - state.weeklyAt > 60000) loadWeekly(); }
+  if (view === 'home') { loadRecentNews(); loadAchievements(); loadShop(); loadChallenges(); refreshStats(); if (homeLayout().some((b) => b.id === 'reco' && !b.hidden)) loadReco(); if (!state.weeklyAt || Date.now() - state.weeklyAt > 60000) loadWeekly(); }
   if (view === 'challenges' || view === 'profile') loadChallenges();
   if (view === 'friends') loadMyCard();
   api.noteVisit(view).catch(() => {}); // secret trophy "Curieux"
@@ -3986,7 +4426,7 @@ async function launch(id) {
 }
 
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-launch],[data-fav],[data-open],[data-nav],[data-source],[data-back],[data-folder],[data-store],[data-rename],[data-cover],[data-hide],[data-remove],[data-toggle-hidden],[data-tsort],[data-add],[data-pick-avatar],[data-reset-avatar],[data-slot-clear],[data-slot]');
+  const t = e.target.closest('[data-launch],[data-fav],[data-open],[data-nav],[data-source],[data-back],[data-folder],[data-store],[data-rename],[data-cover],[data-hide],[data-remove],[data-uninstall],[data-dnd-game],[data-toggle-hidden],[data-tsort],[data-add],[data-pick-avatar],[data-reset-avatar],[data-slot-clear],[data-slot]');
   const adm = e.target.closest('[data-adm]');
   if (adm && !adm.disabled) return adminClick(adm);
   const st = e.target.closest('[data-set-tab],[data-theme-pick],[data-setting],[data-lib],[data-acc]');
@@ -4067,6 +4507,13 @@ document.addEventListener('click', async (e) => {
     await reload(); return render(true);
   }
   if (d.remove) { await api.removeManual(d.remove); await reload(); state.view = 'library'; return render(); }
+  if (d.uninstall) return uninstallFlow(d.uninstall);
+  if (d.dndGame) {
+    state.settings = await api.setSettings({ dndGame: d.dndGame });
+    const on = state.settings.dndGames.includes(d.dndGame);
+    toast(on ? `${byId(d.dndGame).name} : pas de notification d'amis pendant tes parties${state.settings.dnd === 'competitive' ? '' : ' (choisis « Parties classées » dans Paramètres → Général)'}` : 'Notifications d\'amis réactivées pour ce jeu');
+    return render(true);
+  }
   if (d.toggleHidden !== undefined) { state.showHidden = !state.showHidden; return render(true); }
   if (d.add !== undefined) return addGame();
   if (d.tsort) {
@@ -4260,6 +4707,7 @@ if (api.onUpdateReady) {
   loadShop();
   loadAchievements();
   refreshStats();
+  setTimeout(claimLoginStreak, 2000);
   setTimeout(loadRecentNews, 2500);
   setTimeout(loadReco, 3000);
   api.onReco(() => loadReco());

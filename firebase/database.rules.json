@@ -17,7 +17,7 @@
         },
         "level": {
           ".write": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
-          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999 && ((auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true) || (data.exists() && newData.val() <= data.val()) || (!data.exists() && newData.val() <= 5) || (data.parent().child('boostAt').exists() && now - data.parent().child('boostAt').val() < 600000) || (data.exists() && newData.val() <= data.val() + 1 && (!data.parent().child('levelAt').exists() || now - data.parent().child('levelAt').val() >= (data.val() < 10 ? 600000 : 3600000))))"
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100 && ((auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true) || (data.exists() && newData.val() <= data.val()) || (!data.exists() && newData.val() <= 5) || (data.parent().child('boostAt').exists() && now - data.parent().child('boostAt').val() < 600000) || (data.exists() && newData.val() <= data.val() + 1 && (!data.parent().child('levelAt').exists() || now - data.parent().child('levelAt').val() >= (data.val() < 10 ? 600000 : 3600000))))"
         },
         "levelAt": {
           ".write": "auth != null && auth.token.email === '__ADMIN_EMAIL__' && auth.token.email_verified === true",
@@ -220,6 +220,23 @@
             ".validate": false
           }
         },
+        "banner": {
+          ".validate": "newData.isString() && newData.val().beginsWith('https://') && newData.val().length <= 500"
+        },
+        "bestCards": {
+          "$i": {
+            ".validate": "$i.matches(/^[01]$/) && newData.hasChildren(['id'])",
+            "id": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 20 && newData.val().matches(/^[a-z]+$/)"
+            },
+            "holo": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
         "$other": {
           ".validate": false
         }
@@ -269,7 +286,7 @@
             ".validate": "newData.isString() && newData.val().length <= 20"
           },
           "min": {
-            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999"
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100"
           },
           "$other": {
             ".validate": false
@@ -310,7 +327,7 @@
             ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20 && newData.val().matches(/^[a-z_]+$/)"
           },
           "level": {
-            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999"
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100"
           },
           "hours": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 168"
@@ -334,7 +351,7 @@
             ".validate": "newData.isNumber() && newData.val() >= -100000 && newData.val() <= 100000"
           },
           "level": {
-            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999"
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100"
           },
           "note": {
             ".validate": "newData.isString() && newData.val().length <= 120"

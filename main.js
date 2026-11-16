@@ -268,13 +268,24 @@ function getProfile() {
     title: titles ? titles.equipped() : null,
     frameChoice: p.frame || 'auto',
     showcase: showcaseFor(p, a),
+    bestCards: bestCards(),
   };
 }
 
-/** The 5 showcased achievements, resolved (a slot whose achievement is locked again shows empty). */
+/** The 2 best collectible cards: rarest first, a holographic copy before a normal one. */
+function bestCards() {
+  if (!cards) return [];
+  const RANK = { legendary: 3, epic: 2, rare: 1, common: 0 };
+  return cards.list().cards.filter((c) => c.n > 0)
+    .sort((a, b) => RANK[b.rarity] - RANK[a.rarity] || (b.holo > 0) - (a.holo > 0) || b.n - a.n || a.num - b.num)
+    .slice(0, 2).map((c) => ({ id: c.id, holo: c.holo > 0 }));
+}
+
+/** The 3 showcased achievements, resolved (a slot whose achievement is locked again shows empty). */
+const SHOWCASE_SLOTS = 3;
 function showcaseFor(p, a) {
   const items = a ? a.items : [];
-  return Array.from({ length: 5 }, (_, i) => {
+  return Array.from({ length: SHOWCASE_SLOTS }, (_, i) => {
     const k = p.showcase && p.showcase[i];
     const it = k && items.find((x) => x.key === k && x.tier >= 1);
     if (!it) return null;
@@ -661,6 +672,13 @@ const httpsArt = (g) => {
   return [g.cover, g.header, g.hero].find((u) => typeof u === 'string' && u.startsWith('https://') && u.length <= 500) || null;
 };
 
+/** Wide artwork of a game for the profile banner (Steam hero, else the widest https image). */
+const httpsBanner = (g) => {
+  if (!g) return null;
+  if (g.source === 'steam') return `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${g.id.split(':')[1]}/library_hero.jpg`;
+  return [g.hero, g.header, g.cover].find((u) => typeof u === 'string' && u.startsWith('https://') && u.length <= 500) || null;
+};
+
 /** Public profile card friends see when they open my profile. */
 function getCard() {
   const games = library.games();
@@ -692,6 +710,12 @@ function getCard() {
     ...(monthGame ? { monthGame: monthGame.name.slice(0, 120) } : {}),
   };
   if (top && top.playtimeSec > 0) card.top = { name: top.name.slice(0, 120), hours: Math.round(top.playtimeSec / 360) / 10, ...(httpsArt(top) ? { cover: httpsArt(top) } : {}) };
+  // the banner of my profile page: first game of my top 5, else my most played game
+  const bannerGame = (p.top5 || []).map((id) => byId.get(id)).find(Boolean) || top;
+  const banner = httpsBanner(bannerGame);
+  if (banner) card.banner = banner;
+  const best = bestCards();
+  if (best.length) card.bestCards = best;
   return card;
 }
 
@@ -709,11 +733,40 @@ function updateDiscord() {
 }
 
 /** "Mirko vient de lancer Rocket League": in the app, or as a Windows notification. */
+/**
+ * "Ne pas déranger": no friend notifications while it is on.
+ *  - 'competitive' (default): while a game marked « partie classée » is running
+ *  - 'playing': while any game is running · 'always' · 'off'
+ */
+const DND_MODES = ['off', 'competitive', 'playing', 'always'];
+function dndActive() {
+  const s = store.data.settings;
+  const mode = DND_MODES.includes(s.dnd) ? s.dnd : 'competitive';
+  if (mode === 'always') return true;
+  if (mode === 'off' || !tracker) return false;
+  const running = tracker.runningIds();
+  if (mode === 'playing') return running.length > 0;
+  const marked = new Set(s.dndGames || []);
+  return running.some((id) => marked.has(id));
+}
+
+/**
+ * Mode « en jeu »: when a game starts, Linkgeek gets out of the way (minimised, animations
+ * paused by the window) to leave memory and CPU to the game. Back to normal when it stops.
+ */
+let gameModeOn = false;
+function updateGameMode(running) {
+  const on = store.data.settings.gameMode !== false && running.length > 0;
+  if (on && !gameModeOn && win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) win.minimize();
+  gameModeOn = on;
+  send('gamemode', { on, dnd: dndActive() }); // also tells the window whether « Ne pas déranger » is on
+}
+
 function notifyFriendGames(snap) {
   const now = new Map(snap.friends.map((f) => [f.uid, f.game ? f.game.id : null]));
   const prev = lastFriendGames;
   lastFriendGames = now;
-  if (!prev || store.data.settings.notifyFriends === false) return;
+  if (!prev || store.data.settings.notifyFriends === false || dndActive()) return;
   for (const f of snap.friends) {
     if (!f.game || !prev.has(f.uid) || prev.get(f.uid) === f.game.id) continue;
     send('friends:activity', { uid: f.uid, name: f.name, photo: f.photo, game: f.game });
@@ -744,6 +797,11 @@ function getSettings() {
     account: store.data.account,
     admin: { isAdmin: isAdmin(), online: !!(online && online.session) },
     notifyFriends: s.notifyFriends !== false,
+    gameMode: s.gameMode !== false,
+    homeLayout: s.homeLayout || null,
+    dnd: DND_MODES.includes(s.dnd) ? s.dnd : 'competitive',
+    dndGames: s.dndGames || [],
+    dndActive: store ? dndActive() : false,
     weeklyBoard: s.weeklyBoard !== false,
     discord: { ...discordConfig(), connected: discord.ready },
     language: s.language === 'en' ? 'en' : 'fr',
@@ -862,6 +920,11 @@ function registerIpc() {
     return { shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, settings: getSettings() };
   });
   /* ---- Collectible cards (boosters bought with tokens) ---- */
+  /** Called by the window when it opens (and now and then): pays today's login streak bonus once. */
+  ipcMain.handle('shop:claimLogin', () => {
+    const r = shop.claimLogin();
+    return { result: r, shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() } };
+  });
   ipcMain.handle('cards:get', () => cards.list());
   ipcMain.handle('cards:open', () => {
     const gift = cards.gifts > 0;
@@ -874,11 +937,11 @@ function registerIpc() {
     return { shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() }, profile };
   });
 
-  /** 5 showcased achievements: only unlocked ones, each at most once. */
+  /** 3 showcased achievements: only unlocked ones, each at most once. */
   ipcMain.handle('profile:setShowcase', (_e, keys) => {
     const got = new Set(achievements.list().items.filter((it) => it.tier >= 1).map((it) => it.key));
     const seen = new Set();
-    const showcase = Array.from({ length: 5 }, (_, i) => {
+    const showcase = Array.from({ length: SHOWCASE_SLOTS }, (_, i) => {
       const k = Array.isArray(keys) && typeof keys[i] === 'string' ? keys[i] : null;
       if (!k || !got.has(k) || seen.has(k)) return null;
       seen.add(k); return k;
@@ -939,6 +1002,20 @@ function registerIpc() {
     if (patch && typeof patch.closeToTray === 'boolean') s.closeToTray = patch.closeToTray;
     if (patch && typeof patch.startup === 'boolean') setStartup(patch.startup);
     if (patch && typeof patch.notifyFriends === 'boolean') s.notifyFriends = patch.notifyFriends;
+    if (patch && typeof patch.gameMode === 'boolean') s.gameMode = patch.gameMode;
+    if (patch && (Array.isArray(patch.homeLayout) || patch.homeLayout === null)) {
+      // order + visibility of the home blocks: [{ id, hidden }]
+      s.homeLayout = patch.homeLayout === null ? undefined : patch.homeLayout
+        .filter((b) => b && typeof b.id === 'string' && /^[a-z]{2,12}$/.test(b.id)).slice(0, 20)
+        .map((b) => ({ id: b.id, hidden: !!b.hidden }));
+    }
+    if (patch && DND_MODES.includes(patch.dnd)) s.dnd = patch.dnd;
+    if (patch && typeof patch.dndGame === 'string') {
+      // marks / unmarks one game as « partie classée »
+      const l = new Set(s.dndGames || []);
+      if (l.has(patch.dndGame)) l.delete(patch.dndGame); else l.add(patch.dndGame.slice(0, 200));
+      s.dndGames = [...l].slice(0, 300);
+    }
     if (patch && typeof patch.weeklyBoard === 'boolean') {
       s.weeklyBoard = patch.weeklyBoard;
       if (online && online.session) { online.lastWeekly = ''; online.publishWeekly().catch(() => {}); }
@@ -1038,7 +1115,7 @@ function registerIpc() {
     if (hasXp || hasLevel) {
       challenges.grant({
         xp: hasXp ? Math.max(-100000, Math.min(100000, xp)) : undefined,
-        level: hasLevel ? Math.min(999, level) : undefined,
+        level: hasLevel ? Math.min(100, level) : undefined, // level 100 is the maximum
         title: hasLevel ? `Niveau fixé à ${Math.floor(level)} (admin)` : `${xp > 0 ? 'XP ajoutée' : 'XP retirée'} (admin)`,
       });
     }
@@ -1212,6 +1289,26 @@ function registerIpc() {
     if (g && g.installDir) shell.openPath(g.installDir);
   });
 
+  /**
+   * Opens the uninstaller of a game, from the right place:
+   * Steam → its own uninstall dialog; Epic → its library; Xbox / Microsoft Store / games added by
+   * hand → Windows "Installed apps"; Battle.net, Ubisoft, EA, GOG → their uninstaller (registry).
+   * Returns { how } so the window can say what happens next.
+   */
+  ipcMain.handle('game:uninstall', async (_e, id) => {
+    const g = findGame(id);
+    if (!g) throw new Error('Jeu introuvable');
+    if (g.source === 'steam') { await shell.openExternal(`steam://uninstall/${g.id.split(':')[1]}`); return { how: 'steam' }; }
+    if (g.source === 'epic') { await shell.openExternal('com.epicgames.launcher://library'); return { how: 'epic' }; }
+    if (g.uninstall && typeof g.uninstall === 'string') {
+      // the uninstaller registered by the game itself (it asks for confirmation on its own)
+      spawn(g.uninstall, { shell: true, detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      return { how: 'program' };
+    }
+    await shell.openExternal('ms-settings:appsfeatures');
+    return { how: 'windows' };
+  });
+
   ipcMain.handle('game:openStore', (_e, id) => {
     const g = findGame(id);
     if (g && g.storeUrl) shell.openExternal(g.storeUrl);
@@ -1341,6 +1438,7 @@ app.whenReady().then(async () => {
   tracker = new Tracker(store, () => library.games(), (running) => {
     send('games:running', running);
     send('library:changed');
+    updateGameMode(running);
     if (online) online.heartbeat().catch(() => {}); // friends see the new game right away
     updateDiscord();
   });

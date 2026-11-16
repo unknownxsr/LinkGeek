@@ -21,14 +21,20 @@ const RANKS = [
 /** XP needed to go from level n to n+1. */
 const xpStep = (n) => 100 + 20 * (n - 1);
 
+/** Highest level: XP stops counting once it is reached. */
+const MAX_LEVEL = 100;
+/** Total XP needed to reach a level. */
+const xpForLevel = (level) => { let t = 0; for (let n = 1; n < Math.min(level, MAX_LEVEL); n++) t += xpStep(n); return t; };
+const MAX_XP = xpForLevel(MAX_LEVEL);
+const capXp = (xp) => Math.max(0, Math.min(MAX_XP, Math.floor(xp || 0)));
+
 function levelFromXp(xp) {
   let level = 1;
-  let rest = Math.max(0, Math.floor(xp || 0));
-  while (rest >= xpStep(level)) { rest -= xpStep(level); level++; }
+  let rest = capXp(xp);
+  while (level < MAX_LEVEL && rest >= xpStep(level)) { rest -= xpStep(level); level++; }
+  if (level >= MAX_LEVEL) return { level: MAX_LEVEL, into: 0, needed: 0, max: true };
   return { level, into: rest, needed: xpStep(level) };
 }
-/** Total XP needed to reach a level. */
-const xpForLevel = (level) => { let t = 0; for (let n = 1; n < level; n++) t += xpStep(n); return t; };
 const rankFor = (level, ranks = RANKS) => [...ranks].reverse().find((r) => level >= r.min) || ranks[0];
 
 /** Validates a rank table edited by the admin: same 8 rank keys, names, strictly increasing levels from 1. */
@@ -39,7 +45,7 @@ function sanitizeRanks(list) {
     const name = String(r.name || '').trim().slice(0, 20);
     const min = i === 0 ? 1 : Math.floor(Number(r.min));
     if (!name) throw new Error(`Le rang ${i + 1} n'a pas de nom`);
-    if (!Number.isFinite(min) || min < 1 || min > 999) throw new Error(`Niveau invalide pour « ${name} »`);
+    if (!Number.isFinite(min) || min < 1 || min > MAX_LEVEL) throw new Error(`Niveau invalide pour « ${name} » (entre 1 et ${MAX_LEVEL})`);
     return { min, key: def.key, name };
   });
   for (let i = 1; i < out.length; i++) {
@@ -118,7 +124,7 @@ class Challenges {
     const d = this.store.data;
     if (!d.progress || typeof d.progress !== 'object') d.progress = {};
     const p = d.progress;
-    p.xp = p.xp || 0;
+    p.xp = capXp(p.xp); // a profile above level 100 (before the cap) comes back to 100
     p.completed = p.completed || {};  // challenge instance id -> ms
     p.history = p.history || [];      // [{ title, xp, at, kind }]
     p.current = p.current || {};      // { day: {key, ids}, week: {key, ids} }
@@ -257,7 +263,7 @@ class Challenges {
     const ranks = this.ranks();
     const rank = rankFor(l.level, ranks);
     const next = ranks.find((r) => r.min > l.level) || null;
-    return { xp: p.xp, level: l.level, into: l.into, needed: l.needed, rank: rank.key, rankName: rank.name, nextRank: next ? { key: next.key, name: next.name, level: next.min } : null };
+    return { xp: capXp(p.xp), level: l.level, into: l.into, needed: l.needed, max: !!l.max, maxLevel: MAX_LEVEL, rank: rank.key, rankName: rank.name, nextRank: next ? { key: next.key, name: next.name, level: next.min } : null };
   }
 
   /** Awards XP for newly completed challenges. */
@@ -272,7 +278,7 @@ class Challenges {
       for (const it of items) {
         if (it.doneAt || it.value < it.goal) continue;
         p.completed[it.id] = Date.now();
-        p.xp += it.xp;
+        p.xp = capXp(p.xp + it.xp); // nothing above level 100
         p.history.unshift({ title: it.title, xp: it.xp, at: Date.now(), kind });
         fresh.push({ title: it.title, xp: it.xp, kind });
       }
@@ -298,8 +304,8 @@ class Challenges {
     const p = this.data;
     const beforeXp = p.xp;
     const before = levelFromXp(p.xp).level;
-    if (Number.isFinite(g.level) && g.level >= 1) p.xp = xpForLevel(Math.min(999, Math.floor(g.level)));
-    if (Number.isFinite(g.xp)) p.xp = Math.max(0, Math.floor(p.xp + g.xp));
+    if (Number.isFinite(g.level) && g.level >= 1) p.xp = xpForLevel(Math.min(MAX_LEVEL, Math.floor(g.level)));
+    if (Number.isFinite(g.xp)) p.xp = capXp(p.xp + g.xp);
     const delta = p.xp - beforeXp;
     const title = String(g.title || (Number.isFinite(g.level) ? `Niveau fixé à ${Math.floor(g.level)} par l'administrateur` : 'Cadeau de l\'administrateur')).slice(0, 120);
     const kind = g.kind === 'wheel' ? 'wheel' : 'admin'; // the shop never pays tokens for these XP
@@ -342,4 +348,4 @@ class Challenges {
   }
 }
 
-module.exports = { Challenges, RANKS, levelFromXp, rankFor, sanitizeRanks, xpForLevel };
+module.exports = { Challenges, RANKS, levelFromXp, rankFor, sanitizeRanks, xpForLevel, MAX_LEVEL };

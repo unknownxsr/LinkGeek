@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Battle.net, Ubisoft Connect, EA app and GOG games, read from the Windows
  * registry (one PowerShell call). Covers are looked up later by name (covers.js).
  */
@@ -77,7 +77,7 @@ async function scanOthers() {
     const exe = exeFromIcon(u.DisplayIcon);
     push({
       id: 'battlenet:' + uid, source: 'battlenet', sourceLabel: 'Battle.net', name: u.DisplayName, publisher: 'Blizzard Entertainment',
-      installDir: dir, exePath: exe,
+      installDir: dir, exePath: exe, uninstall: u.UninstallString || null,
       launch: code && bnetExe && fs.existsSync(bnetExe) ? { type: 'exe', path: bnetExe, args: [`--exec=launch ${code}`] }
         : exe ? { type: 'exe', path: exe, args: [] } : null,
     });
@@ -96,7 +96,7 @@ async function scanOthers() {
     if (!name || NOT_GAMES.test(name)) continue;
     push({
       id: 'ubisoft:' + u.id, source: 'ubisoft', sourceLabel: 'Ubisoft Connect', name, publisher: 'Ubisoft',
-      installDir: dir, exePath: exeFromIcon(meta.DisplayIcon),
+      installDir: dir, exePath: exeFromIcon(meta.DisplayIcon), uninstall: meta.UninstallString || null,
       launch: { type: 'url', url: `uplay://launch/${u.id}/0` },
     });
   }
@@ -109,6 +109,7 @@ async function scanOthers() {
     push({
       id: 'gog:' + g.gameID, source: 'gog', sourceLabel: 'GOG', name: g.gameName,
       installDir: cleanDir(g.path), exePath: exe,
+      uninstall: fs.existsSync(path.join(cleanDir(g.path), 'unins000.exe')) ? `"${path.join(cleanDir(g.path), 'unins000.exe')}"` : null,
       storeUrl: `https://www.gog.com/game/${encodeURIComponent(String(g.gameName).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''))}`,
       launch: galaxy && fs.existsSync(galaxy)
         ? { type: 'exe', path: galaxy, args: ['/command=runGame', `/gameId=${g.gameID}`, `/path=${cleanDir(g.path)}`] }
@@ -124,7 +125,7 @@ async function scanOthers() {
     if (!exe) continue;
     push({
       id: 'ea:' + String(u.PSChildName).replace(/[^\w.-]/g, ''), source: 'ea', sourceLabel: 'EA app', name: u.DisplayName,
-      publisher: 'Electronic Arts', installDir: dir, exePath: exe, launch: { type: 'exe', path: exe, args: [] },
+      publisher: 'Electronic Arts', installDir: dir, exePath: exe, uninstall: u.UninstallString || null, launch: { type: 'exe', path: exe, args: [] },
     });
   }
 

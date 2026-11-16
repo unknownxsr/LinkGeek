@@ -89,6 +89,13 @@ const WHEEL = [
 const THEME_DUPLICATE = 150;
 const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
+/**
+ * Login streak: opening Linkgeek on consecutive days gives a growing token bonus
+ * (day 1 → 10 … day 7 and after → 50). Missing a day starts again at day 1.
+ */
+const STREAK_BONUS = [10, 15, 20, 25, 30, 35, 50];
+const streakBonus = (n) => STREAK_BONUS[Math.min(Math.max(n, 1), STREAK_BONUS.length) - 1];
+
 const XP_PER_TOKEN = 8;
 const tokensForXp = (xp) => Math.max(0, Math.round(xp / XP_PER_TOKEN));
 const tokensForLevel = (lv) => 20 + 5 * lv;
@@ -158,6 +165,31 @@ class Shop {
       this.store.save();
     }
     return total;
+  }
+
+  /** Where the login streak stands (without changing it). */
+  loginInfo(now = Date.now()) {
+    const l = this.data.login || {};
+    const today = dayKey(now);
+    const yesterday = dayKey(new Date(now).setDate(new Date(now).getDate() - 1));
+    const alive = l.day === today || l.day === yesterday;
+    const streak = alive ? l.streak || 0 : 0;
+    const claimed = l.day === today;
+    return { streak, best: l.best || 0, claimedToday: claimed, nextBonus: streakBonus(claimed ? streak + 1 : streak + 1), bonuses: STREAK_BONUS };
+  }
+
+  /** First opening of the day: extends (or restarts) the streak and pays its bonus. null if already done today. */
+  claimLogin(now = Date.now()) {
+    const s = this.data;
+    const l = s.login || {};
+    const today = dayKey(now);
+    if (l.day === today || (l.at && l.at > now + 3600000)) return null; // already today / clock set back
+    const yesterday = dayKey(new Date(now).setDate(new Date(now).getDate() - 1));
+    const streak = l.day === yesterday ? (l.streak || 0) + 1 : 1;
+    const bonus = streakBonus(streak);
+    s.login = { day: today, at: now, streak, best: Math.max(l.best || 0, streak) };
+    this.add(bonus, `Série de connexion : jour ${streak}`);
+    return { streak, bonus, best: s.login.best, broken: !!l.day && l.day !== yesterday && (l.streak || 0) > 1, nextBonus: streakBonus(streak + 1), bonuses: STREAK_BONUS };
   }
 
   owns(id) { return this.data.owned.includes(id); }
@@ -273,6 +305,7 @@ class Shop {
       log: s.log.slice(0, 15),
       rates: { perXp: XP_PER_TOKEN, level: tokensForLevel(0), perLevel: 5 },
       wheel: this.wheel(),
+      login: this.loginInfo(),
     };
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "linkgeek",
   "productName": "Linkgeek",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "description": "Launcher de jeux unifié : Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app, GOG et jeux ajoutés à la main, avec statistiques, succès, défis et amis.",
   "main": "main.js",
   "author": "Zenshyy",

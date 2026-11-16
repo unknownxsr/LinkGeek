@@ -382,7 +382,7 @@ class Online {
     if (!this.session) return;
     clearTimeout(this.levelTimer);
     const id = this.getIdentity();
-    const want = Math.max(1, Math.min(999, Math.floor(id.level || 1)));
+    const want = Math.max(1, Math.min(100, Math.floor(id.level || 1)));
     const me = (await this.db('GET', `users/${this.session.uid}`).catch(() => null)) || this.me || {};
     this.me = me;
     const cur = Number(me.level) || 0;
@@ -418,7 +418,12 @@ class Online {
     try {
       await this.db('PUT', `cards/${this.session.uid}`, card);
       this.lastCard = key;
-    } catch { /* rules from an older version: ignore */ }
+    } catch {
+      // rules from an older version (no "banner" / "bestCards" yet): publish the rest of the card anyway
+      if (!card.banner && !card.bestCards) return;
+      const { banner, bestCards, ...rest } = card;
+      try { await this.db('PUT', `cards/${this.session.uid}`, rest); this.lastCard = key; } catch { /* ignore */ }
+    }
   }
 
   /**
@@ -546,7 +551,7 @@ class Online {
     if (!this.session) throw new Error('Connecte-toi au mode en ligne pour gérer les autres joueurs');
     const body = { at: SV_TIME, by: String(this.getIdentity().name || 'Admin').slice(0, 40) };
     if (Number.isFinite(g.xp) && g.xp !== 0) body.xp = Math.max(-100000, Math.min(100000, Math.floor(g.xp)));
-    if (Number.isFinite(g.level)) body.level = Math.max(1, Math.min(999, Math.floor(g.level)));
+    if (Number.isFinite(g.level)) body.level = Math.max(1, Math.min(100, Math.floor(g.level)));
     if (g.note) body.note = String(g.note).slice(0, 120);
     if (Number.isFinite(g.coins) && g.coins !== 0) body.coins = Math.max(-1000000, Math.min(1000000, Math.trunc(g.coins)));
     if (g.ach) { body.ach = String(g.ach).slice(0, 30); body.tier = Math.max(0, Math.min(4, Math.floor(Number(g.tier) || 0))); }

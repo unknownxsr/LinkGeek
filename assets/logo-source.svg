@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 120 120">
+  <!-- Linkgeek logo: pink 3D L with speed lines. build/draw-logo.ps1 draws the same shapes into logo-source.png -->
+  <rect width="120" height="120" rx="26" fill="#000"/>
+  <path d="M12 52h16M8 62h20M14 72h14" stroke="#ff5fbf" stroke-width="4" stroke-linecap="round" opacity=".5"/>
+  <polygon points="40,32 48,24 64,24 56,32" fill="#ff9ad6"/>
+  <polygon points="56,32 64,24 64,68 56,76" fill="#b8357f"/>
+  <polygon points="56,76 64,68 92,68 84,76" fill="#ff9ad6"/>
+  <polygon points="84,76 92,68 92,84 84,92" fill="#b8357f"/>
+  <polygon points="40,32 56,32 56,76 84,76 84,92 40,92" fill="#ff5fbf"/>
+</svg>

@@ -82,7 +82,7 @@ const SECTIONS = [
   {
     title: '⚙️ Et aussi…', image: null,
     text: '• 🎨 **Thèmes** et apparence au choix.\n'
-      + '• 🌍 Linkgeek en **français ou en anglais**.\n'
+      + '• 🌍 Linkgeek en **français, anglais, espagnol, allemand et russe** (il suit la langue de Windows).\n'
       + '• 🎮 **Discord** : affiche à quoi tu joues sur ton profil Discord.\n'
       + '• 🚀 Lancement au **démarrage de Windows** (facultatif).\n'
       + '• 🔄 **Mises à jour automatiques** : tu as toujours la dernière version.\n\n'
@@ -90,4 +90,72 @@ const SECTIONS = [
   },
 ];
 
-module.exports = { INTRO, SECTIONS };
+/* ---------- English version (shown under each French section) ---------- */
+const INTRO_EN = {
+  title: '📖 Linkgeek guide',
+  text: 'Linkgeek brings **all your PC games into one launcher**: Steam, Epic Games, Xbox / Microsoft Store, Battle.net, Ubisoft Connect, EA app and GOG.\n\n'
+    + 'It finds your games on its own, tracks your playtime, and adds everything you need to play with friends: challenges, levels, collectible cards, duels, messaging…\n\n'
+    + 'Here is the full tour 👇\n\n'
+    + '⬇️ Download: {telecharger}\n❓ A question or a problem: {aide}',
+};
+
+const SECTIONS_EN = [
+  { title: '🏠 Home',
+    text: '• A big banner to **resume your last game** in one click.\n'
+      + '• The **weekly global leaderboard** (reset every Monday) and your online friends.\n'
+      + '• **Customize the home page**: pick which blocks are shown and in what order.\n\n'
+      + '**Top bar**\n'
+      + '🔔 Notifications · 💬 Messages · 📺 TV mode · 🔗 Share · ☀️/🌙 Do not disturb (turns on by itself while you play).' },
+  { title: '📚 Library',
+    text: '• All your games **detected automatically**, with their covers.\n'
+      + '• Sort and filter by platform, favorites, **collections** (Playing, To finish…) and genres.\n'
+      + '• Quick search with **Ctrl+K**, or add a game by hand.\n'
+      + '• Each game page shows playtime, last session, disk space, activity over the last 30 days and game news.\n\n'
+      + '⏱️ **Playtime is tracked automatically**, whatever launcher you use: Linkgeek stays quietly in the system tray.' },
+  { title: '👥 Friends',
+    text: '• Add friends with their **friend code** and see live if they are online or **what they are playing**.\n'
+      + '• **Invite a friend** to join your game.\n'
+      + '• 🏆 **Leaderboard** between friends.\n'
+      + '• ⚔️ **Weekly duels**: "who plays … the most?" or "who completes the most challenges?". Everyone bets Geek Coins, the winner takes it all.\n'
+      + '• 🔎 **Teammates**: show for 24 h that you are looking for someone to play with.\n'
+      + '• 🎁 **Referral**: a friend installs Linkgeek with your code and you both get a free booster.\n'
+      + '• A customizable **profile**: picture, title, frame, showcased achievements and your 5 favorite games.' },
+  { title: '💬 Messaging',
+    text: '• Chat with your friends right inside the launcher (💬 button at the top, or on a friend\'s card).\n'
+      + '• A notification when you get a message, even during a game.\n'
+      + '• **Enter** to send, **Shift+Enter** for a new line.\n'
+      + '• Messages are kept for **1 week**, then deleted automatically.' },
+  { title: '🎯 Challenges, levels and badges',
+    text: '• **Daily, weekly and one-time challenges**: play and earn XP.\n'
+      + '• **Level up** and unlock **badges**: Rookie, Bronze, Silver, Gold, Platinum, Diamond, Emerald, Master.\n'
+      + '• 🔥 **Login streak**: come back every day to earn more and more Geek Coins.' },
+  { title: '🃏 Achievements and collectible cards',
+    text: '• **Achievements** to unlock by playing, to showcase on your profile.\n'
+      + '• **Open boosters** (3 per day) and complete card sets.\n'
+      + '• 5 rarities (Common, Rare, Epic, Legendary, Mythic), with **skin** and **holographic** versions.\n'
+      + '• ♻️ **Merge duplicates**: 15 commons make 1 rare, 20 rares make 1 epic.' },
+  { title: '🛍️ Shop and Geek Coins',
+    text: '• Earn **Geek Coins** with challenges, levels and your login streak.\n'
+      + '• 🎡 **Daily wheel**: one free spin every day (Geek Coins, XP or a random theme).\n'
+      + '• Spend your Geek Coins on **themes** and **titles** to customize Linkgeek and your profile.\n'
+      + '• **Limited editions** arrive during events.' },
+  { title: '📊 Statistics',
+    text: '• Your total and weekly playtime, disk space used and number of games.\n'
+      + '• Your **records**: longest session, longest streak, most played day.\n'
+      + '• **When you play**: the hours and days you play the most.\n'
+      + '• Compare yourself with last week or with your friends, **export as an image** and discover your **monthly recap**.' },
+  { title: '📺 TV / controller mode',
+    text: '• A **big, full-screen** interface, made for the TV and a controller.\n'
+      + '• Open it with the 📺 button at the top, or with the **☰** button on your controller.\n'
+      + '• **A** to select, **B** to go back, **LB/RB** to switch tabs, **X** to play, **Y** for favorites.\n'
+      + '• The screen button at the top right takes you back to desktop mode.' },
+  { title: '⚙️ And also…',
+    text: '• 🎨 **Themes** and appearance of your choice.\n'
+      + '• 🌍 Linkgeek in **English, French, Spanish, German and Russian** (it follows your Windows language).\n'
+      + '• 🎮 **Discord**: shows what you are playing on your Discord profile.\n'
+      + '• 🚀 Launch at **Windows startup** (optional).\n'
+      + '• 🔄 **Automatic updates**: you always have the latest version.\n\n'
+      + 'An idea to improve Linkgeek? Share it in the suggestions channel. Have fun! 🎮' },
+];
+
+module.exports = { INTRO, SECTIONS, INTRO_EN, SECTIONS_EN };

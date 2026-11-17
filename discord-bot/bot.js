@@ -80,13 +80,16 @@ const findChannel = (guild, part) => guild.channels.cache.find((c) => c.isTextBa
 /* ---------- Discord ---------- */
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+const en = (t) => ({ 'en-US': t, 'en-GB': t });
 const COMMANDS = [
-  { name: 'classement', description: 'Top 10 des joueurs Linkgeek de la semaine' },
-  { name: 'telecharger', description: 'Lien de téléchargement de la dernière version de Linkgeek' },
-  { name: 'stats', description: 'Nombre de joueurs Linkgeek' },
-  { name: 'lier', description: 'Lier ton compte Linkgeek : ton rang devient un rôle ici', options: [{ type: 3, name: 'code', description: 'Le code à 6 caractères (Linkgeek → Paramètres → Compte)', required: true, min_length: 6, max_length: 6 }] },
-  { name: 'delier', description: 'Délier ton compte Linkgeek (retire ton rôle de rang)' },
+  { name: 'classement', description: 'Top 10 des joueurs Linkgeek de la semaine', description_localizations: en('Top 10 Linkgeek players of the week') },
+  { name: 'telecharger', description: 'Lien de téléchargement de la dernière version de Linkgeek', description_localizations: en('Download link for the latest Linkgeek version') },
+  { name: 'stats', description: 'Nombre de joueurs Linkgeek', description_localizations: en('Number of Linkgeek players') },
+  { name: 'lier', description: 'Lier ton compte Linkgeek : ton rang devient un rôle ici', description_localizations: en('Link your Linkgeek account: your rank becomes a role here'), options: [{ type: 3, name: 'code', description: 'Le code à 6 caractères (Linkgeek → Paramètres → Compte)', description_localizations: en('The 6-character code (Linkgeek → Settings → Account)'), required: true, min_length: 6, max_length: 6 }] },
+  { name: 'delier', description: 'Délier ton compte Linkgeek (retire ton rôle de rang)', description_localizations: en('Unlink your Linkgeek account (removes your rank role)') },
 ];
+/** Réponse dans la langue de Discord du membre : français si son Discord est en français, sinon anglais. */
+const T = (i, fr, enText) => (String(i.locale || '').startsWith('fr') ? fr : enText);
 
 /* ---------- Comptes liés : rang Linkgeek → rôle Discord ----------
  * Le launcher écrit discordLinks/{uid} = { code, at } ; /lier <code> écrit discord/{uid} = { id, name, at }.
@@ -180,11 +183,11 @@ async function syncAllRanks() {
 async function cmdLier(i) {
   await i.deferReply({ flags: EPHEMERAL });
   const code = String(i.options.getString('code') || '').trim().toUpperCase();
-  if (!/^[A-Z0-9]{6}$/.test(code)) return i.editReply('❌ Le code fait 6 caractères (lettres et chiffres). Tu le trouves dans Linkgeek → Paramètres → Compte → « Lier mon compte Discord ».');
+  if (!/^[A-Z0-9]{6}$/.test(code)) return i.editReply(T(i, '❌ Le code fait 6 caractères (lettres et chiffres). Tu le trouves dans Linkgeek → Paramètres → Compte → « Lier mon compte Discord ».', '❌ The code is 6 characters (letters and numbers). You will find it in Linkgeek → Settings → Account → "Link my Discord account".'));
   const snap = await db.ref('discordLinks').orderByChild('code').equalTo(code).get();
   let uid = null; let at = 0;
   snap.forEach((c) => { uid = c.key; at = Number((c.val() || {}).at) || 0; });
-  if (!uid || Date.now() - at > LINK_TTL) return i.editReply('❌ Code inconnu ou expiré (il est valable 15 minutes). Demande un nouveau code dans Linkgeek → Paramètres → Compte.');
+  if (!uid || Date.now() - at > LINK_TTL) return i.editReply(T(i, '❌ Code inconnu ou expiré (il est valable 15 minutes). Demande un nouveau code dans Linkgeek → Paramètres → Compte.', '❌ Unknown or expired code (it is valid for 15 minutes). Get a new code in Linkgeek → Settings → Account.'));
   // un seul compte Linkgeek par compte Discord
   const updates = { [`discord/${uid}`]: { id: i.user.id, name: i.user.username, at: admin.database.ServerValue.TIMESTAMP }, [`discordLinks/${uid}`]: null };
   const prev = await db.ref('discord').orderByChild('id').equalTo(i.user.id).get();
@@ -194,10 +197,10 @@ async function cmdLier(i) {
   try {
     const ranks = await rankTable();
     const r = await syncMember(i.guild, ranks, await rankRoles(i.guild, ranks), uid, i.user.id);
-    return i.editReply(`✅ Compte Linkgeek lié ! Niveau **${r.level}** · rôle **${r.rank.name}**. Il se met à jour tout seul quand tu montes de rang.`);
+    return i.editReply(T(i, `✅ Compte Linkgeek lié ! Niveau **${r.level}** · rôle **${r.rank.name}**. Il se met à jour tout seul quand tu montes de rang.`, `✅ Linkgeek account linked! Level **${r.level}** · role **${r.rank.name}**. It updates by itself when you rank up.`));
   } catch (e) {
     console.error('Rôle de rang :', e.message);
-    return i.editReply('✅ Compte Linkgeek lié ! Ton rôle de rang arrivera dès que le bot aura la permission de gérer les rôles.');
+    return i.editReply(T(i, '✅ Compte Linkgeek lié ! Ton rôle de rang arrivera dès que le bot aura la permission de gérer les rôles.', '✅ Linkgeek account linked! Your rank role will arrive shortly.'));
   }
 }
 async function cmdDelier(i) {
@@ -205,11 +208,11 @@ async function cmdDelier(i) {
   const prev = await db.ref('discord').orderByChild('id').equalTo(i.user.id).get();
   const updates = {};
   prev.forEach((c) => { updates[`discord/${c.key}`] = null; });
-  if (!Object.keys(updates).length) return i.editReply('Ton compte Discord n\'est lié à aucun compte Linkgeek.');
+  if (!Object.keys(updates).length) return i.editReply(T(i, 'Ton compte Discord n\'est lié à aucun compte Linkgeek.', 'Your Discord account is not linked to any Linkgeek account.'));
   await db.ref().update(updates);
   await clearMember(i.guild, i.user.id).catch(() => {});
   const l = { ...(state.linked || {}) }; for (const k of Object.keys(updates)) delete l[k.split('/')[1]]; state.linked = l; saveState();
-  return i.editReply('✅ Compte Linkgeek délié : ton rôle de rang a été retiré.');
+  return i.editReply(T(i, '✅ Compte Linkgeek délié : ton rôle de rang a été retiré.', '✅ Linkgeek account unlinked: your rank role has been removed.'));
 }
 
 client.once('clientReady', async () => {
@@ -221,6 +224,7 @@ client.once('clientReady', async () => {
   await setupProfile();
   for (const guild of client.guilds.cache.values()) await postRules(guild).catch((e) => console.error('Règlement :', e.message));
   for (const guild of client.guilds.cache.values()) await postLinkInfo(guild).catch((e) => console.error('Salon lier-son-compte :', e.message));
+  for (const guild of client.guilds.cache.values()) await postEnglishWelcome(guild).catch((e) => console.error('english-chat :', e.message));
   await guideAll();
   setInterval(guideAll, 3 * 60 * 1000); // réessaie tant que le guide n'a pas pu être posté (ex. permission manquante)
   await checkRelease();
@@ -240,8 +244,10 @@ client.on('interactionCreate', async (i) => {
     } else if (i.commandName === 'telecharger') {
       await i.deferReply();
       const rel = await latestRelease().catch(() => null);
-      const e = new EmbedBuilder().setColor(COLOR).setTitle('⬇️ Télécharger Linkgeek').setURL(RELEASES)
-        .setDescription(`${rel ? `Dernière version : **${rel.tag_name}**\n` : ''}[Télécharger l'installateur](${RELEASES}) (fichier \`Linkgeek-Setup-x.x.x.exe\`).\n\nSi Windows affiche un avertissement : **Informations complémentaires** → **Exécuter quand même**.`);
+      const e = new EmbedBuilder().setColor(COLOR).setTitle(T(i, '⬇️ Télécharger Linkgeek', '⬇️ Download Linkgeek')).setURL(RELEASES)
+        .setDescription(T(i,
+          `${rel ? `Dernière version : **${rel.tag_name}**\n` : ''}[Télécharger l'installateur](${RELEASES}) (fichier \`Linkgeek-Setup-x.x.x.exe\`).\n\nSi Windows affiche un avertissement : **Informations complémentaires** → **Exécuter quand même**.`,
+          `${rel ? `Latest version: **${rel.tag_name}**\n` : ''}[Download the installer](${RELEASES}) (file \`Linkgeek-Setup-x.x.x.exe\`).\n\nIf Windows shows a warning: **More info** → **Run anyway**.`));
       await i.editReply({ embeds: [e] });
     } else if (i.commandName === 'lier') {
       await cmdLier(i);
@@ -250,11 +256,11 @@ client.on('interactionCreate', async (i) => {
     } else if (i.commandName === 'stats') {
       await i.deferReply();
       const n = (await db.ref('meta/memberCount').get()).val() || 0;
-      await i.editReply({ embeds: [new EmbedBuilder().setColor(COLOR).setTitle('📊 Linkgeek').setDescription(`**${n}** joueurs ont rejoint Linkgeek en ligne.`)] });
+      await i.editReply({ embeds: [new EmbedBuilder().setColor(COLOR).setTitle('📊 Linkgeek').setDescription(T(i, `**${n}** joueurs ont rejoint Linkgeek en ligne.`, `**${n}** players have joined Linkgeek online.`))] });
     }
   } catch (e) {
     console.error(e);
-    const msg = { content: 'Oups, une erreur est survenue. Réessaie dans un instant.', ephemeral: true };
+    const msg = { content: T(i, 'Oups, une erreur est survenue. Réessaie dans un instant.', 'Oops, something went wrong. Please try again in a moment.'), ephemeral: true };
     if (i.deferred || i.replied) i.editReply(msg).catch(() => {}); else i.reply(msg).catch(() => {});
   }
 });
@@ -269,6 +275,14 @@ async function setupProfile() {
   try {
     if (state.bio !== BIO) { await client.application.edit({ description: BIO }); state.bio = BIO; saveState(); console.log('📝 Bio mise à jour'); }
   } catch (e) { console.error('Bio :', e.message); }
+  try {
+    // Photo de profil : avatar.png (change-la quand le fichier change, grâce à sa taille + date)
+    const av = path.join(__dirname, 'avatar.png');
+    if (fs.existsSync(av)) {
+      const st = fs.statSync(av); const sig = `${st.size}:${st.mtimeMs}`;
+      if (state.avatar !== sig) { await client.user.setAvatar(av); state.avatar = sig; saveState(); console.log('🖼️ Photo de profil mise à jour'); }
+    }
+  } catch (e) { console.error('Photo de profil :', e.message); }
   try {
     if (!state.banner) { await client.user.setBanner(path.join(__dirname, 'banniere.png')); state.banner = true; saveState(); console.log('🖼️ Bannière noire appliquée'); }
   } catch (e) { console.error('Bannière :', e.message); }
@@ -291,6 +305,23 @@ function rulesEmbed() {
     .addFields(RULES.map(([name, value]) => ({ name, value })))
     .setFooter({ text: 'Le non-respect du règlement peut entraîner un avertissement, une exclusion ou un bannissement.' });
 }
+const RULES_EN = [
+  ['1. Respect', 'Be respectful to everyone. Insults, harassment, racism, sexism and discrimination are not allowed.'],
+  ['2. No spam', 'No spam, flooding, mass mentions or repeated all-caps messages.'],
+  ['3. No advertising', 'No advertising (servers, socials, commercial links) without a moderator\'s approval, including in DMs.'],
+  ['4. Appropriate content', 'No shocking, violent, sexual or illegal content. No inappropriate username or avatar.'],
+  ['5. The right channels', 'Use each channel for its topic. English speakers: #english-chat to talk, #english-help for questions.'],
+  ['6. No cheating', 'Do not share any way to cheat in Linkgeek (XP, levels, cards) or any modified version of the launcher.'],
+  ['7. Safety', 'Never share your passwords, codes or tokens. The Linkgeek team will never ask for them.'],
+  ['8. Moderation', 'Moderators\' decisions apply. If you have an issue, DM a @Modérateur.'],
+  ['9. Discord rules', 'Discord\'s Terms of Service and Community Guidelines also apply here.'],
+];
+function rulesEmbedEn() {
+  return new EmbedBuilder().setColor(COLOR).setTitle('🇬🇧 LinkGeek server rules')
+    .setDescription('Welcome! So that everyone has a good time, please follow these rules.')
+    .addFields(RULES_EN.map(([name, value]) => ({ name, value })))
+    .setFooter({ text: 'Breaking the rules may lead to a warning, a timeout or a ban.' });
+}
 /** Publie le message une seule fois puis le met à jour (pas de doublon). */
 async function upsert(guild, key, ch, payload) {
   state.msgs = state.msgs || {};
@@ -304,7 +335,7 @@ async function upsert(guild, key, ch, payload) {
 }
 async function postRules(guild) {
   const ch = findChannel(guild, 'règles');
-  if (ch) await upsert(guild, 'rules', ch, { embeds: [rulesEmbed()] });
+  if (ch) await upsert(guild, 'rules', ch, { embeds: [rulesEmbed(), rulesEmbedEn()] });
 }
 /** Salon « lier-son-compte » : message d'explication + seules les commandes sont possibles (salon toujours propre). */
 function linkEmbed() {
@@ -318,6 +349,17 @@ function linkEmbed() {
     )
     .setFooter({ text: 'Ce salon n\'accepte que les commandes. Une question ? Passe par #aide. Ne partage jamais ton code avec quelqu\'un.' });
 }
+function linkEmbedEn() {
+  return new EmbedBuilder().setColor(COLOR).setTitle('🇬🇧 Link your Linkgeek and Discord accounts')
+    .setDescription('Link your Linkgeek account to Discord: your **Linkgeek rank becomes a role** on the server, and it updates by itself when you level up.')
+    .addFields(
+      { name: '1. Open Linkgeek', value: 'Go to **Settings → Account** and click **"Link my Discord account"**.' },
+      { name: '2. Copy your code', value: 'A **6-character** code appears. It is valid for **15 minutes**.' },
+      { name: '3. Type the command here', value: '`/lier code`, replacing *code* with yours. The bot replies privately with your level and role.' },
+      { name: 'Want to unlink?', value: '`/delier` removes the link and your rank role.' },
+    )
+    .setFooter({ text: 'This channel only accepts commands. Never share your code with anyone.' });
+}
 async function postLinkInfo(guild) {
   const ch = findChannel(guild, 'lier-son-compte');
   if (!ch) return;
@@ -329,7 +371,22 @@ async function postLinkInfo(guild) {
       state.linkPerms[guild.id] = true; saveState(); console.log('🔒 Salon lier-son-compte : commandes uniquement');
     } catch (e) { console.error('Permissions lier-son-compte :', e.message); }
   }
-  await upsert(guild, 'link', ch, { embeds: [linkEmbed()] });
+  await upsert(guild, 'link', ch, { embeds: [linkEmbed(), linkEmbedEn()] });
+}
+/** Message d'accueil épinglé en haut de #english-chat. */
+async function postEnglishWelcome(guild) {
+  const ch = findChannel(guild, 'english-chat');
+  if (!ch) return;
+  const m = (part) => { const c = findChannel(guild, part); return c ? `<#${c.id}>` : `#${part}`; };
+  const e = new EmbedBuilder().setColor(COLOR).setTitle('👋 Welcome to the LinkGeek community!')
+    .setDescription('This is the place for English speakers. Chat, share your best cards and find teammates here.\n\n'
+      + `📖 **Guide** (English below each section): ${m('guide')}\n`
+      + `📜 **Rules**: ${m('règles')}\n`
+      + `⬇️ **Download Linkgeek**: ${m('télécharger')}\n`
+      + `🔗 **Link your account** (your rank becomes a role): ${m('lier-son-compte')}\n`
+      + `❓ **Need help?** ${m('english-help')}\n\n`
+      + 'You can type `/telecharger`, `/classement` (weekly top 10) or `/stats` anywhere. Have fun! 🎮');
+  await upsert(guild, 'enwelcome', ch, { embeds: [e] });
 }
 /** Crée le salon « guide » juste sous « règles » (mêmes permissions : lecture seule) s'il n'existe pas. */
 async function guideChannel(guild) {
@@ -361,7 +418,7 @@ async function guideAll() {
   }
 }
 /** Change ce numéro pour supprimer l'ancien guide et le republier en entier (nouveaux messages). */
-const GUIDE_VERSION = 3;
+const GUIDE_VERSION = 4;
 async function postGuide(guild) {
   const ch = await guideChannel(guild);
   state.guideVersion = state.guideVersion || {};
@@ -374,38 +431,58 @@ async function postGuide(guild) {
   }
   const mention = (part, fallback) => { const c = findChannel(guild, part); return c ? `<#${c.id}>` : fallback; };
   const fill = (s) => s.replace('{telecharger}', mention('télécharger', '/telecharger')).replace('{aide}', mention('aide', 'le salon #aide'));
+  const fillEn = (s) => s.replace('{telecharger}', mention('télécharger', '/telecharger')).replace('{aide}', mention('english-help', mention('aide', '#aide')));
   const parts = [{ title: GUIDE.INTRO.title, text: GUIDE.INTRO.text, image: null }, ...GUIDE.SECTIONS];
+  const partsEn = [GUIDE.INTRO_EN, ...GUIDE.SECTIONS_EN];
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
-    const e = new EmbedBuilder().setColor(COLOR).setTitle(p.title).setDescription(fill(p.text));
+    const e = new EmbedBuilder().setColor(COLOR).setTitle(`🇫🇷 ${p.title}`).setDescription(fill(p.text));
+    const eEn = new EmbedBuilder().setColor(COLOR).setTitle(`🇬🇧 ${partsEn[i].title}`).setDescription(fillEn(partsEn[i].text));
     const files = [];
     if (p.image) {
       files.push(new AttachmentBuilder(path.join(__dirname, 'guide', p.image), { name: p.image }));
-      e.setImage(`attachment://${p.image}`);
+      eEn.setImage(`attachment://${p.image}`); // la capture en dernier, sous les deux textes
     }
-    if (i === parts.length - 1) e.setFooter({ text: 'Linkgeek · gratuit · Windows 10 et 11' });
-    await upsert(guild, `guide:${i}`, ch, { embeds: [e], files, attachments: [] });
+    if (i === parts.length - 1) eEn.setFooter({ text: 'Linkgeek · gratuit / free · Windows 10 & 11' });
+    await upsert(guild, `guide:${i}`, ch, { embeds: [e, eEn], files, attachments: [] });
   }
   state.guideVersion[guild.id] = GUIDE_VERSION; saveState();
 }
 async function postDownload(guild, rel) {
   const ch = findChannel(guild, 'télécharger');
   if (!ch) return;
-  const key = `dl:${rel.tag_name}`;
+  const key = `dl3:${rel.tag_name}`; // dl2 : version bilingue (force la mise à jour du message)
   if (state.msgs && state.msgs[`${guild.id}:dlVersion`] === key) return;
   const exe = (rel.assets || []).find((a) => /\.exe$/i.test(a.name));
+  const zip = (rel.assets || []).find((a) => /\.zip$/i.test(a.name));
   const e = new EmbedBuilder().setColor(COLOR).setTitle('⬇️ Télécharger Linkgeek')
     .setDescription(`**Version actuelle : ${rel.tag_name}**\n\n`
       + '1. Clique sur le bouton ci-dessous pour télécharger l\'installateur.\n'
       + '2. Lance le fichier `Linkgeek-Setup.exe`.\n'
       + '3. Si Windows affiche « Windows a protégé votre ordinateur » : **Informations complémentaires** → **Exécuter quand même**.\n\n'
+      + '**Windows bloque complètement ?** (« Le Contrôle intelligent des applications a bloqué… », sans bouton pour continuer) → prends la **version .zip** :\n'
+      + '1. Clic droit sur le `.zip` → **Propriétés** → coche **Débloquer** → OK.\n'
+      + '2. Clic droit → **Extraire tout**.\n'
+      + '3. Dans le dossier extrait (pas dans `app`), double-clique sur **Installer Linkgeek** et réponds **O** + Entrée aux 2 questions.\n\n'
       + 'Linkgeek se met ensuite à jour tout seul. Un problème ? Passe sur #aide.')
     .setFooter({ text: 'Windows 10 et 11 · Gratuit' });
+  const eEn = new EmbedBuilder().setColor(COLOR).setTitle('🇬🇧 Download Linkgeek')
+    .setDescription(`**Current version: ${rel.tag_name}**\n\n`
+      + '1. Click the button below to download the installer.\n'
+      + '2. Run the `Linkgeek-Setup.exe` file.\n'
+      + '3. If Windows says "Windows protected your PC": **More info** → **Run anyway**.\n\n'
+      + '**Windows blocks it completely?** ("Smart App Control blocked…", no way to continue) → use the **.zip version**:\n'
+      + '1. Right-click the `.zip` → **Properties** → tick **Unblock** → OK.\n'
+      + '2. Right-click → **Extract All**.\n'
+      + '3. In the extracted folder (not in `app`), double-click **Installer Linkgeek** and answer **O** + Enter to the 2 questions.\n\n'
+      + 'Linkgeek then updates by itself. A problem? Ask in #english-help.')
+    .setFooter({ text: 'Windows 10 & 11 · Free' });
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(`Télécharger ${rel.tag_name}`).setEmoji('⬇️').setURL(exe ? exe.browser_download_url : RELEASES),
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Toutes les versions').setURL(`https://github.com/${REPO}/releases`),
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(`Télécharger / Download ${rel.tag_name}`).setEmoji('⬇️').setURL(exe ? exe.browser_download_url : RELEASES),
+    ...(zip ? [new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Version .zip (si bloqué / if blocked)').setEmoji('🗜️').setURL(zip.browser_download_url)] : []),
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Toutes les versions / All versions').setURL(`https://github.com/${REPO}/releases`),
   );
-  await upsert(guild, 'download', ch, { embeds: [e], components: [row] });
+  await upsert(guild, 'download', ch, { embeds: [e, eEn], components: [row] });
   state.msgs[`${guild.id}:dlVersion`] = key; saveState();
 }
 
@@ -421,7 +498,7 @@ async function checkRelease() {
       if (!ch) continue;
       const notes = (rel.body || '').trim();
       const e = new EmbedBuilder().setColor(COLOR).setTitle(`🆕 ${rel.name || rel.tag_name} est disponible !`).setURL(rel.html_url)
-        .setDescription(`${notes && notes !== rel.name ? notes.slice(0, 3500) + '\n\n' : ''}Linkgeek se met à jour tout seul. Nouveau ? [Télécharge-le ici](${RELEASES}).`)
+        .setDescription(`${notes && notes !== rel.name ? notes.slice(0, 3500) + '\n\n' : ''}Linkgeek se met à jour tout seul. Nouveau ? [Télécharge-le ici](${RELEASES}).\n🇬🇧 Linkgeek updates by itself. New here? [Download it here](${RELEASES}).`)
         .setTimestamp(new Date(rel.published_at));
       await ch.send({ embeds: [e] });
     }

@@ -1,5 +1,8 @@
 param([switch]$Silent, [switch]$Startup)
 $ErrorActionPreference = 'Stop'
+# Files extracted from a downloaded .zip carry the 'from the Internet' mark: remove it so Windows
+# (SmartScreen / Smart App Control) does not block the app copied from them.
+try { Get-ChildItem -LiteralPath $PSScriptRoot -Recurse -File | Unblock-File -ErrorAction SilentlyContinue } catch { }
 $AppName  = 'Linkgeek'
 $Src      = Join-Path $PSScriptRoot 'app'
 $Version  = '1.0.0'
@@ -60,6 +63,7 @@ New-Item -ItemType Directory -Force $Dest | Out-Null
 robocopy $Src $Dest /MIR /NFL /NDL /NJH /NJS /NP /XF (Join-Path $Dest 'uninstall.ps1') (Join-Path $Dest 'Desinstaller.cmd') (Join-Path $Dest 'icon.ico') | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "La copie a echoue (robocopy $LASTEXITCODE)" }
 Copy-Item (Join-Path $PSScriptRoot 'icon.ico') $Icon -Force
+try { Get-ChildItem -LiteralPath $Dest -Recurse -File | Unblock-File -ErrorAction SilentlyContinue } catch { }
 Copy-Item (Join-Path $PSScriptRoot 'uninstall.ps1') (Join-Path $Dest 'uninstall.ps1') -Force
 Set-Content -Path (Join-Path $Dest 'Desinstaller.cmd') -Encoding ASCII -Value "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0uninstall.ps1`"`r`npause"
 

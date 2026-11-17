@@ -278,6 +278,9 @@
     "Partager": "Share",
     // ---- mode TV / manette + fusion des doubles ----
     "⚗️ Fusion des doubles": "⚗️ Duplicate fusion",
+    "★ Carte du jour": "★ Card of the day",
+    "de chance de l'obtenir à chaque carte tirée aujourd'hui, en plus de ses chances normales.": "chance to get it with every card drawn today, on top of its normal odds.",
+    "Pas encore dans ta collection": "Not in your collection yet",
     "Tes cartes en trop deviennent une carte plus rare, tirée au hasard (elle peut sortir avec son skin ou en holo).": "Your spare cards become a rarer card, drawn at random (it can come with its skin or holo).",
     "⚗️ Fusionner": "⚗️ Fuse",
     "Pas encore assez de doubles": "Not enough duplicates yet",
@@ -300,6 +303,8 @@
     "Ajoute des jeux depuis le mode bureau pour les retrouver ici.": "Add games from desktop mode to find them here.",
     "La connexion se fait depuis le mode bureau (Amis).": "Sign in from desktop mode (Friends).",
     "Passer en mode bureau": "Switch to desktop mode",
+    "Revenir au mode bureau": "Back to desktop mode",
+    "Rejoindre le serveur Discord": "Join the Discord server",
     "🖥️ Passer en mode bureau": "🖥️ Switch to desktop mode",
     "Retirer des favoris": "Remove from favorites",
     "Ajouter aux favoris": "Add to favorites",
@@ -618,6 +623,22 @@
     "Discord : un identifiant numérique (Paramètres Discord → Avancés → Mode développeur, puis clic droit sur ton nom → Copier l'identifiant) rend l'icône cliquable. Avec un simple pseudo, tes amis pourront le copier.": 'Discord: a numeric ID (Discord settings → Advanced → Developer mode, then right-click your name → Copy User ID) makes the icon clickable. With just a username, your friends can copy it.',
     'Date de création de ton compte Linkgeek': 'Date your Linkgeek account was created', 'Date de ta première utilisation de Linkgeek sur ce PC': 'Date you first used Linkgeek on this PC',
     'Redémarre pour en profiter.': 'Restart to use it.', 'Redémarrer': 'Restart', 'Plus tard': 'Later', "Elle s'installera à la prochaine fermeture": 'It will be installed next time you quit',
+    // ---- country leaderboard, local currency, Discord account link ----
+    '🌍 Monde': '🌍 World',
+    "Personne de ton pays n'a encore joué cette semaine. Lance un jeu pour prendre la première place !": 'Nobody from your country has played yet this week. Launch a game to take first place!',
+    'Prix Steam actuels ·': 'Current Steam prices ·',
+    '· hors promotions. Les jeux des autres plateformes ne sont pas comptés.': '· without discounts. Games from other platforms are not counted.',
+    'Compte Discord': 'Discord account',
+    'Lie ton compte Discord : ton rang Linkgeek (Bronze, Or, Diamant, Master…) devient un rôle sur le serveur Discord de Linkgeek, mis à jour tout seul quand tu montes de niveau.': 'Link your Discord account: your Linkgeek rank (Bronze, Gold, Diamond, Master…) becomes a role on the Linkgeek Discord server, updated by itself when you level up.',
+    '✓ Lié': '✓ Linked', 'Délier': 'Unlink',
+    'Rejoins le serveur Discord de Linkgeek': 'Join the Linkgeek Discord server',
+    "Dans n'importe quel salon, tape": 'In any channel, type',
+    'puis ce code :': 'then this code:',
+    'Le code est valable 15 minutes. Cette page se met à jour toute seule une fois le compte lié.': 'The code is valid for 15 minutes. This page updates by itself once the account is linked.',
+    'Lier mon compte Discord': 'Link my Discord account',
+    'Code copié : colle-le après /lier sur Discord': 'Code copied: paste it after /lier on Discord',
+    'Compte Discord délié : tes rôles de rang seront retirés': 'Discord account unlinked: your rank roles will be removed',
+    'Connecte-toi au mode en ligne pour lier ton compte Discord': 'Sign in to online mode to link your Discord account',
   };
 
   // [pattern, replacement]: text with numbers, names or dates
@@ -760,8 +781,12 @@
     [/^(Commune|Rare|Épique|Légendaire|Mythique) (\d+(?:,\d+)?) %$/, (m, a, b) => `${tr(a)} ${b.replace(',', '.')} %`],
     [/^(\d+) \/ (\d+) · (\d+) %$/, '$1 / $2 · $3 %'],
     [/^(\d+) \/ (\d+) versions · (\d+) %$/, '$1 / $2 versions · $3 %'],
-    [/^(\d+) nouvelles? cartes?(.*) · (\d+) \/ (\d+) dans ta collection$/, (m, a, rest, b, c) => `${a} new card${a > 1 ? 's' : ''}${rest.replace(/avec skin/, 'with skin')} · ${b} / ${c} in your collection`],
-    [/^Aucune nouvelle carte(.*) · (\d+) \/ (\d+) dans ta collection$/, (m, rest, b, c) => `No new card${rest.replace(/avec skin/, 'with skin')} · ${b} / ${c} in your collection`],
+    [/^(\d+) nouvelles? cartes?(.*) · (\d+) \/ (\d+) dans ta collection$/, (m, a, rest, b, c) => `${a} new card${a > 1 ? 's' : ''}${rest.replace(/avec skin/, 'with skin').replace(/la carte du jour/, 'the card of the day')} · ${b} / ${c} in your collection`],
+    [/^Aucune nouvelle carte(.*) · (\d+) \/ (\d+) dans ta collection$/, (m, rest, b, c) => `No new card${rest.replace(/avec skin/, 'with skin').replace(/la carte du jour/, 'the card of the day')} · ${b} / ${c} in your collection`],
+    // carte du jour
+    [/^★ Carte du jour · change dans (.+)$/, (m, t) => `★ Card of the day · changes in ${t}`],
+    [/^Dans ta collection : ×(\d+)$/, 'In your collection: ×$1'],
+    [/^Chaque jour, une nouvelle carte est choisie au hasard, la même pour tous les joueurs : (.+)\.$/, (m, l) => `Every day a new card is picked at random, the same for every player: ${l.replace(/Épique/g, 'Epic').replace(/Légendaire/g, 'Legendary').replace(/Mythique/g, 'Mythic').replace(/par carte/g, 'per card').replace(/(\d),(\d)/g, '$1.$2')}.`],
     [/^([○◆✦]) (Sans skin|Avec skin|Holo)$/, (m, i, v) => `${i} ${({ 'Sans skin': 'No skin', 'Avec skin': 'With skin', Holo: 'Holo' })[v]}`],
     [/^◆ Skin (\d+(?:,\d+)?) %$/, (m, a) => `◆ Skin ${a.replace(',', '.')} %`],
     [/^✦ Holo (\d+(?:,\d+)?) %$/, (m, a) => `✦ Holo ${a.replace(',', '.')} %`],
@@ -927,11 +952,17 @@
     [/^: les défis te rapportent toujours des Geek Coins$/, ': challenges still give you Geek Coins'],
     [/^Niveau invalide pour « (.+) » \(entre 1 et (\d+)\)$/, 'Invalid level for "$1" (between 1 and $2)'],
     [/^Thème (Néon|Océan|Forêt|Braise|Sakura|Synthwave|Or royal|Matrix|Aurore boréale|Cyberpunk|Galaxie|Holographique)$/, (m, n) => `${tr(n)} theme`],
+    // storage (stats) and fusion tiles (cards)
+    [/^(.+) libres sur (.+)$/, (m, a, b) => `${tr(a)} free of ${tr(b)}`],
+    [/^Disque (\S+)$/, 'Drive $1'],
+    [/^(\d+) (Commune|Rare|Épique|Légendaire|Mythique)s?$/, (m, n, r) => `${n} ${tr(r)}`],
+    [/^Autres (\d.+)$/, (m, a) => `Other ${tr(a)}`],
   ];
 
   const MONTHS = { janvier: 'January', février: 'February', mars: 'March', avril: 'April', mai: 'May', juin: 'June', juillet: 'July', août: 'August', septembre: 'September', octobre: 'October', novembre: 'November', décembre: 'December' };
   const DAYS = { lundi: 'Monday', mardi: 'Tuesday', mercredi: 'Wednesday', jeudi: 'Thursday', vendredi: 'Friday', samedi: 'Saturday', dimanche: 'Sunday' };
-  const UNITS = [[/\bMo\b/g, 'MB'], [/\bGo\b/g, 'GB'], [/\bTo\b/g, 'TB'], [/\bKo\b/g, 'KB'], [/\bpts\b/g, 'pts']];
+  // sizes only after a number ("35 Go" → "35 GB"): a game named "Go-Go Town!" stays as it is
+  const UNITS = [[/(\d)(\s?)Mo\b/g, '$1$2MB'], [/(\d)(\s?)Go\b/g, '$1$2GB'], [/(\d)(\s?)To\b/g, '$1$2TB'], [/(\d)(\s?)Ko\b/g, '$1$2KB']];
 
   /** End of the uninstall confirmation: " Ton temps de jeu … gardés dans Linkgeek. Cela libérera environ 35 Go." */
   function trTail(r) {
@@ -947,13 +978,20 @@
     let out = s;
     // dates written by toLocaleDateString('fr-FR')
     out = out.replace(/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/g, (d) => DAYS[d]);
-    out = out.replace(/\b(\d{1,2}) (janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)( \d{4})?/g, (m, d, mo, y) => `${MONTHS[mo]} ${d}${y ? ',' + y : ''}`);
+    // month first in the United States (and a few countries), day first everywhere else
+    const mdy = ['US', 'CA', 'PH', 'BZ', 'FM'].includes(window.linkgeekRegion);
+    out = out.replace(/\b(\d{1,2}) (janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)( \d{4})?/g, (m, d, mo, y) => (mdy ? `${MONTHS[mo]} ${d}${y ? ',' + y : ''}` : `${d} ${MONTHS[mo]}${y || ''}`));
     for (const [re, rep] of UNITS) out = out.replace(re, rep);
     return out;
   }
 
   const ORIG = new WeakMap();
   let on = false;
+  // active language: 'en' (this file) or one of renderer/i18n-xx.js (es, de, ru)
+  const LANGS = ['en', 'es', 'de', 'ru'];
+  let cur = null;
+  let T = tr;
+  const active = (s) => T(s);
 
   // user text (chat messages…) is marked translate="no": never touched
   const keep = (el) => !!(el && el.closest && el.closest('[translate="no"]'));
@@ -962,14 +1000,14 @@
     const raw = node.nodeValue;
     if (!raw || !/[A-Za-zÀ-ÿ]/.test(raw)) return;
     const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
-    const t = tr(m[2]);
+    const t = active(m[2]);
     if (t !== m[2]) { ORIG.set(node, raw); node.nodeValue = m[1] + t + m[3]; }
   }
 
   function translateAttrs(el) {
     for (const a of ['title', 'placeholder', 'aria-label']) {
       const v = el.getAttribute && el.getAttribute(a);
-      if (v) { const t = tr(v.trim()); if (t !== v.trim()) el.setAttribute(a, t); }
+      if (v) { const t = active(v.trim()); if (t !== v.trim()) el.setAttribute(a, t); }
     }
   }
 
@@ -996,25 +1034,51 @@
     }
   });
 
+  /**
+   * Shows the interface in `lang`: 'fr' (the original text), 'en', 'es', 'de' or 'ru'.
+   * Going back to French, or from one translation to another, reloads the window
+   * (the original French text is needed again).
+   */
   window.applyLanguage = function (lang) {
-    const en = lang === 'en';
-    if (en === on) return;
-    if (!en) { location.reload(); return; } // back to the original French
-    on = true;
-    document.documentElement.lang = 'en';
-    try { localStorage.setItem('linkgeek-lang', 'en'); } catch { /* ignore */ }
+    if (!LANGS.includes(lang)) lang = 'fr';
+    let saved = null;
+    try { saved = localStorage.getItem('linkgeek-lang'); } catch { /* ignore */ }
+    if (lang === (cur || 'fr')) return;
+    try { if (lang === 'fr') localStorage.removeItem('linkgeek-lang'); else localStorage.setItem('linkgeek-lang', lang); } catch { /* ignore */ }
+    if (on || (lang === 'fr' && saved)) { location.reload(); return; }
+    if (lang === 'fr') return;
+    const pack = lang === 'en' ? null : window.LINKGEEK_LANGS && window.LINKGEEK_LANGS[lang];
+    T = pack ? pack.tr : tr;
+    cur = lang; on = true;
+    document.documentElement.lang = lang;
     walk(document.body);
     obs.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder'] });
   };
-  window.linkgeekTr = tr;
-
-  // apply before the first paint when English was chosen last time
-  try {
-    if (localStorage.getItem('linkgeek-lang') === 'en') document.addEventListener('DOMContentLoaded', () => window.applyLanguage('en'));
-  } catch { /* ignore */ }
-  const origReload = window.applyLanguage;
-  window.applyLanguage = function (lang) {
-    if (lang !== 'en') { try { if (localStorage.getItem('linkgeek-lang') === 'en') { localStorage.removeItem('linkgeek-lang'); if (on) { location.reload(); return; } } } catch { /* ignore */ } }
-    origReload(lang);
+  window.linkgeekTr = active;
+  window.linkgeekTrEn = tr;
+  /** Locale for dates and times written in the active language (fr-FR when nothing is translated). */
+  // language of the interface + country of the player (window.linkgeekRegion, set by app.js):
+  // 'fr-FR', 'en-US', 'es-MX'… so numbers, dates and times follow the country (17/11 or 11/17, 15:04 or 3:04 PM)
+  window.linkgeekLocale = () => {
+    const r = /^[A-Z]{2}$/.test(window.linkgeekRegion || '') ? window.linkgeekRegion : null;
+    const l = cur || 'fr';
+    if (!r) return ({ en: 'en-GB', es: 'es-ES', de: 'de-DE', ru: 'ru-RU' })[l] || 'fr-FR';
+    const want = `${l}-${r}`;
+    if (locCache[want]) return locCache[want];
+    let out = want;
+    try {
+      // this language has no format for this country (e.g. English in Brazil): the country's own format
+      const got = new Intl.DateTimeFormat(want).resolvedOptions().locale;
+      if (!got.toUpperCase().endsWith('-' + r)) out = `${new Intl.Locale('und-' + r).maximize().language}-${r}`;
+    } catch { /* keep want */ }
+    return (locCache[want] = out);
   };
+  const locCache = {};
+
+  // apply before the first paint when a language was chosen last time
+  try {
+    const l = localStorage.getItem('linkgeek-lang');
+    // (not in the notification window, which translates each notification itself)
+    if (LANGS.includes(l) && !document.documentElement.hasAttribute('data-no-auto-lang')) document.addEventListener('DOMContentLoaded', () => window.applyLanguage(l));
+  } catch { /* ignore */ }
 })();

@@ -132,10 +132,17 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   -webkit-app-region: drag;
   z-index: 50;
 }
-.brand { display: flex; align-items: center; gap: 9px; width: 228px; font-family: var(--font-display); font-weight: 650; letter-spacing: .2px; }
+.brand { display: flex; align-items: center; gap: 9px; min-width: 228px; flex-shrink: 0; font-family: var(--font-display); font-weight: 650; letter-spacing: .2px; }
 .brand img { width: 20px; height: 20px; border-radius: 6px; }
 /* notification centre */
-.notif-wrap { position: relative; display: flex; align-items: center; -webkit-app-region: no-drag; margin-left: 4px; }
+.notif-wrap { position: relative; display: flex; align-items: center; -webkit-app-region: no-drag; }
+/* the icons of the title bar: one row, same size, same spacing, all clickable (no window drag) */
+.tb-actions { display: flex; align-items: center; gap: 4px; margin-left: 6px; flex-shrink: 0; -webkit-app-region: no-drag; }
+.tb-actions > *, .tb-actions .notif-bell { flex-shrink: 0; -webkit-app-region: no-drag; }
+.tb-actions .dnd-switch { margin-left: 4px; }
+.discord-btn { text-decoration: none; }
+.discord-btn:hover { color: #5865f2; }
+.tb-actions .notif-bell svg.bell-ic { width: 18px; height: 18px; display: block; }
 /* « Ne pas déranger » switch: the knob sits under the sun (normal) or slides under the moon (on) */
 .dnd-switch { -webkit-app-region: no-drag; position: relative; flex-shrink: 0; width: 58px; height: 30px; padding: 0; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: background .2s, border-color .2s; }
 .dnd-switch:hover { border-color: var(--border-2); }
@@ -2623,6 +2630,23 @@ html.hb-dragging, html.hb-dragging * { cursor: grabbing !important; user-select:
 .soc-modal .fields { grid-template-columns: 1fr; }
 .dl-kinds { grid-column: 1 / -1; }
 .dl-kinds button { white-space: nowrap; }
+/* ---- Carte du jour ---- */
+.cotd { --cg: 201,139,255; display: flex; align-items: center; gap: 30px; padding: 22px 28px; border-radius: var(--radius-lg); border: 1px solid rgba(var(--cg), .4); background: radial-gradient(360px 240px at 110px 50%, rgba(var(--cg), .22), transparent 70%), var(--panel); box-shadow: 0 18px 40px -26px rgba(var(--cg), .8); }
+.cotd.r-legendary { --cg: 255,201,60; } .cotd.r-mythic { --cg: 255,138,247; }
+.cotd-card { width: 150px; flex-shrink: 0; animation: cotd-float 4s ease-in-out infinite; }
+@keyframes cotd-float { 50% { transform: translateY(-5px); } }
+.cotd-body { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.cotd-kicker { font-size: 11.5px; font-weight: 850; letter-spacing: 1px; text-transform: uppercase; color: rgb(var(--cg)); }
+.cotd-body h2 { margin: 0; font-size: 24px; }
+.cotd-boost { margin: 4px 0 0; font-size: 14px; color: var(--text-2); }
+.cotd-boost b { color: rgb(var(--cg)); font-size: 16px; }
+.cotd-have { font-size: 12.5px; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: var(--surface); color: var(--muted); }
+.cotd-have.on { background: rgba(61,220,132,.14); color: #3ddc84; }
+.cotd-note { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.flip.daily .flip-face.front { position: relative; }
+.tc-daily { position: absolute; left: 50%; bottom: -11px; transform: translateX(-50%); z-index: 3; white-space: nowrap; font-size: 10.5px; font-weight: 900; letter-spacing: .5px; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; color: #10121a; background: linear-gradient(90deg, #c4b5fd, #ff8af7); box-shadow: 0 4px 14px rgba(255,138,247,.55); }
+.flip.daily.on .tcard { box-shadow: 0 0 0 2px rgba(255,138,247,.7), 0 0 28px rgba(255,138,247,.55); }
+@media (max-width: 760px) { .cotd { flex-direction: column; align-items: flex-start; } }
 /* ---- Fusion des doubles ---- */
 .fusion .tro-head > div { display: flex; flex-direction: column; gap: 2px; }
 .fu-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
@@ -2668,6 +2692,9 @@ body.tv-on { cursor: default; }
 .tv-me .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .tv-coins { display: inline-flex; align-items: center; gap: .35em; font-weight: 700; color: #ffd36b; }
 .tv-coins .coin { width: 1.2em; height: 1.2em; }
+.tv-desk { width: 2.4em; height: 2.4em; border-radius: .7em; display: grid; place-items: center; background: var(--grad) !important; color: #fff !important; transition: transform .15s, box-shadow .15s; }
+.tv-desk svg { width: 1.3em; height: 1.3em; fill: currentColor; }
+.tv-desk:hover, .tv-desk.tv-f { transform: scale(1.08); box-shadow: 0 0 0 .15em var(--bg), 0 0 0 .3em var(--accent); }
 .tv-clock { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-2); }
 
 /* button legend (bottom) */
@@ -2843,3 +2870,22 @@ body.tv-on .chat-panel { display: none; }
 .chp-empty b { color: var(--text); font-size: 15px; }
 .chp-who span b, .chp-cl span b { font-size: inherit; font-weight: 600; }
 body.chat-open:not(.tv-on) #toasts { right: 410px; }
+
+/* ---- Settings → Account: Discord account link ---- */
+.set-discord { margin-top: 18px; padding: 16px 18px; border-radius: 12px; border: 1px solid rgba(88,101,242,.4); background: rgba(88,101,242,.08); display: flex; flex-direction: column; gap: 12px; }
+.set-discord > div:first-child b { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.set-discord > div:first-child span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.set-discord > button { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; }
+.set-discord .set-note { margin-top: 0; }
+.dc-ic { width: 18px; height: 18px; fill: #5865f2; flex-shrink: 0; }
+.set-discord .btn-play .dc-ic { fill: #fff; }
+.dl-state { display: flex; align-items: center; gap: 10px; }
+.dl-state b { font-size: 14px; }
+.dl-state button { margin-left: auto; }
+.dl-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
+.dl-steps a { color: #8b93ff; }
+.dl-code { display: flex; align-items: center; gap: 12px; }
+.dl-code b { font-family: ui-monospace, Consolas, monospace; font-size: 26px; letter-spacing: 6px; padding: 6px 16px; border-radius: 10px; background: var(--surface); border: 1px dashed rgba(88,101,242,.6); }
+/* ---- Home: world / country leaderboard tabs ---- */
+.wb-head-act { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.wb-scope button { white-space: nowrap; }

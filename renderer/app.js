@@ -99,7 +99,25 @@ function fmtAgo(ms) {
   if (days === 1) return 'Hier';
   if (days < 30) return `Il y a ${days} jours`;
   if (days < 365) return `Il y a ${Math.floor(days / 30)} mois`;
-  return new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  return fmtDayNum(ms, true);
+}
+
+/* ---------------- Country: date format, currency ---------------- */
+/** Locale of the interface language in the player's country, e.g. 'fr-FR', 'en-US', 'es-MX'. */
+const userLoc = () => (typeof linkgeekLocale === 'function' ? linkgeekLocale() : 'fr-FR');
+/** Short date in numbers, in the country's order: 17/11 in France, 11/17 in the United States. */
+function fmtDayNum(ms, year = false) {
+  try { return new Date(ms).toLocaleDateString(userLoc(), { day: '2-digit', month: '2-digit', ...(year ? { year: 'numeric' } : {}) }); } catch { return new Date(ms).toLocaleDateString('fr-FR'); }
+}
+/** Name of a country in the interface language ('FR' → France / Francia / Frankreich…). */
+function countryName(cc) {
+  const lang = (state.settings && state.settings.language) || 'fr';
+  try { return new Intl.DisplayNames([lang], { type: 'region' }).of(cc) || cc; } catch { return cc; }
+}
+/** An amount in a currency, written like in the player's country (12,99 € / $12.99 / R$ 12,99). */
+function fmtMoney(v, currency = 'EUR') {
+  const o = { style: 'currency', currency, minimumFractionDigits: v < 100 ? 2 : 0, maximumFractionDigits: 2 };
+  try { return v.toLocaleString(userLoc(), o); } catch { return v.toLocaleString('fr-FR', { ...o, currency: 'EUR' }); }
 }
 
 /* ---------------- Images ---------------- */
@@ -660,7 +678,7 @@ function homeStatsWidget(games) {
       <div><b>${t.count}</b><span>jeux · ${fmtSize(t.size)}</span></div>
       <div><b title="${esc(top)}">${esc(top)}</b><span>le plus joué</span></div>
     </div>
-    <div class="wst-chart">${days.map((d) => `<div title="${esc(fmtTime(d.sec))}"><span><i style="height:${Math.max(3, Math.round((d.sec / max) * 100))}%" class="${d.sec ? '' : 'zero'}"></i></span><small>${d.d.toLocaleDateString(state.settings && state.settings.language === 'en' ? 'en-GB' : 'fr-FR', { weekday: 'short' }).slice(0, 2)}</small></div>`).join('')}</div>`;
+    <div class="wst-chart">${days.map((d) => `<div title="${esc(fmtTime(d.sec))}"><span><i style="height:${Math.max(3, Math.round((d.sec / max) * 100))}%" class="${d.sec ? '' : 'zero'}"></i></span><small>${d.d.toLocaleDateString(typeof linkgeekLocale === 'function' ? linkgeekLocale() : 'fr-FR', { weekday: 'short' }).slice(0, 2)}</small></div>`).join('')}</div>`;
   return homeWidget('stats', 'Statistiques', 'Ton temps de jeu', 'stats', body);
 }
 
@@ -722,7 +740,8 @@ setInterval(() => {
 async function loadWeekly() {
   if (state.weeklyLoading) return;
   state.weeklyLoading = true;
-  try { state.weekly = await api.weeklyBoard(); state.weeklyAt = Date.now(); } catch { state.weekly = state.weekly || { rows: [], error: 'network' }; }
+  const scope = state.boardScope || 'world';
+  try { state.weekly = await api.weeklyBoard(scope); state.weeklyAt = Date.now(); } catch { state.weekly = state.weekly || { rows: [], error: 'network' }; }
   state.weeklyLoading = false;
   if (state.view === 'home') render(true);
 }
@@ -753,7 +772,9 @@ function weeklyBoardSection() {
   else if (w.offline) body = `<div class="wb-empty">${I.trophy || ''}<div><b>Connecte-toi pour voir le classement</b><span>Le classement réunit tous les joueurs de Linkgeek. Connecte-toi avec Google pour y participer.</span></div><button class="ghost" data-goto-account>Se connecter</button></div>`;
   else if (w.error === 'rules') body = '<p class="news-empty">Le classement n\'est pas encore activé sur le serveur.</p>';
   else if (w.error) body = '<p class="news-empty">Impossible de charger le classement pour le moment.</p>';
-  else if (!w.rows.length) body = '<p class="news-empty">Personne n\'a encore joué cette semaine. Lance un jeu pour prendre la première place !</p>';
+  else if (!w.rows.length) body = w.scope === 'country'
+    ? `<p class="news-empty">Personne de ton pays n'a encore joué cette semaine. Lance un jeu pour prendre la première place !</p>`
+    : '<p class="news-empty">Personne n\'a encore joué cette semaine. Lance un jeu pour prendre la première place !</p>';
   else {
     const max = Math.max(1, ...w.rows.map((r) => r.hours));
     const SLOTS = 5; // always 5 places on the podium, the empty ones are still to take
@@ -767,12 +788,64 @@ function weeklyBoardSection() {
         : '<p class="wb-note">Tu n\'as pas encore joué cette semaine : lance un jeu pour entrer dans le classement.</p>';
     }
   }
+  const scope = state.boardScope || 'world';
+  const cc = (w && w.country) || (state.settings && state.settings.region) || 'FR';
+  const tabs = `<div class="segmented sm wb-scope"><button class="${scope === 'world' ? 'active' : ''}" data-board-scope="world">🌍 Monde</button><button class="${scope === 'country' ? 'active' : ''}" data-board-scope="country">📍 <span translate="no">${esc(countryName(cc))}</span></button></div>`;
   return `<section class="section home-col w-board">
-    <div class="section-head"><div><h2>Classement général de la semaine</h2><div class="sub">${esc(sub)}</div></div>${w && !w.offline ? '<button class="link" data-board-refresh>Actualiser</button>' : ''}</div>
+    <div class="section-head"><div><h2>Classement général de la semaine</h2><div class="sub">${esc(sub)}</div></div><div class="wb-head-act">${tabs}${w && !w.offline ? '<button class="link" data-board-refresh>Actualiser</button>' : ''}</div></div>
     <div class="panel lb wb">${body}</div>
     ${w && !w.enabled ? '<p class="lb-note">Tu as choisi de ne pas apparaître dans le classement (Paramètres → Général).</p>' : ''}
   </section>`;
 }
+
+/* ---- Settings → Account: link the Discord account (Linkgeek rank = role on the Discord server) ---- */
+const DISCORD_INVITE = 'https://discord.gg/brQ5WKAyNe';
+async function loadDiscordLink() {
+  if (state.discordLinkLoading) return;
+  state.discordLinkLoading = true;
+  try { state.discordLink = await api.discordLinkStatus(); } catch { state.discordLink = { error: true }; }
+  state.discordLinkLoading = false;
+  if (state.view === 'settings' && state.settingsTab === 'account') render(true);
+}
+// while a code is waiting to be typed on Discord, check every 8 s whether the bot used it
+setInterval(() => {
+  const d = state.discordLink;
+  if (d && d.code && !document.hidden && state.view === 'settings' && state.settingsTab === 'account') loadDiscordLink();
+}, 8000);
+function discordLinkBlock() {
+  const d = state.discordLink;
+  if (!d) { loadDiscordLink(); return ''; }
+  const head = `<div><b>${DISCORD_IC}Compte Discord</b><span>Lie ton compte Discord : ton rang Linkgeek (Bronze, Or, Diamant, Master…) devient un rôle sur le serveur Discord de Linkgeek, mis à jour tout seul quand tu montes de niveau.</span></div>`;
+  if (d.error) return `<div class="set-discord">${head}<button class="ghost" data-dlink="refresh">Réessayer</button></div>`;
+  if (d.linked) {
+    return `<div class="set-discord linked">${head}
+      <div class="dl-state"><span class="chip live">✓ Lié</span><b translate="no">${esc(d.linked.name || 'Discord')}</b>
+        <button class="ghost" data-dlink="unlink">Délier</button></div></div>`;
+  }
+  if (d.code) {
+    return `<div class="set-discord">${head}
+      <ol class="dl-steps">
+        <li><a href="${DISCORD_INVITE}" target="_blank" rel="noopener">Rejoins le serveur Discord de Linkgeek</a></li>
+        <li>Dans n'importe quel salon, tape <b>/lier</b> puis ce code :</li>
+      </ol>
+      <div class="dl-code"><b translate="no">${esc(d.code)}</b><button class="ghost" data-dlink="copy">Copier</button></div>
+      <p class="set-note">Le code est valable 15 minutes. Cette page se met à jour toute seule une fois le compte lié.</p></div>`;
+  }
+  return `<div class="set-discord">${head}<button class="btn-play sm" data-dlink="start">${DISCORD_IC}Lier mon compte Discord</button></div>`;
+}
+const DISCORD_IC = '<svg class="dc-ic" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M19.3 5.3A16.6 16.6 0 0 0 15.2 4l-.5 1a15.4 15.4 0 0 0-5.4 0L8.8 4a16.6 16.6 0 0 0-4.1 1.3C2.1 9.2 1.4 13 1.8 16.7a16.7 16.7 0 0 0 5 2.5l1-1.6a10.8 10.8 0 0 1-1.6-.8l.4-.3a11.9 11.9 0 0 0 10.8 0l.4.3c-.5.3-1 .6-1.6.8l1 1.6a16.6 16.6 0 0 0 5-2.5c.5-4.3-.8-8.1-2.9-11.4zM8.7 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>';
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-dlink]');
+  if (!b) return;
+  const a = b.dataset.dlink;
+  try {
+    if (a === 'refresh') return loadDiscordLink();
+    if (a === 'copy') { await navigator.clipboard.writeText(state.discordLink.code); return toast('Code copié : colle-le après /lier sur Discord'); }
+    if (a === 'start') state.discordLink = await api.discordLinkStart();
+    if (a === 'unlink') { state.discordLink = await api.discordUnlink(); toast('Compte Discord délié : tes rôles de rang seront retirés'); }
+    render(true);
+  } catch (err) { toast(errMsg(err), true); }
+});
 
 /* ---- Home: "À savoir" info carousel (a new tip every 5 s, in a loop) ---- */
 const INFO_MS = 5000;
@@ -1194,7 +1267,7 @@ function activityChart(sessions, days) {
   }
   return `<div class="columns">${buckets.map((b, i) => `
     <div class="col">
-      <div class="tip">${b.d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} · ${b.sec ? fmtTime(b.sec) : 'aucune session'}</div>
+      <div class="tip">${fmtDayNum(b.d)} ·${b.sec ? fmtTime(b.sec) : 'aucune session'}</div>
       <div class="c ${b.sec ? '' : 'zero'}" style="height:${b.sec ? Math.max(4, (b.sec / max) * 100) : 2}%"></div>
       <label>${i % Math.ceil(days / 10) === 0 || i === days - 1 ? b.d.getDate() : '&nbsp;'}</label>
     </div>`).join('')}</div>`;
@@ -1299,21 +1372,22 @@ function comparisonsPanel(sessions) {
     <label class="cmp-toggle"><button class="switch ${state.cmpFriends ? 'on' : ''}" data-cmp-friends role="switch" aria-checked="${!!state.cmpFriends}"><i></i></button>Comparer avec mes amis</label>
     ${friends}`;
 }
-const fmtEur = (v) => v.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: v < 1 ? 2 : v < 100 ? 2 : 0, maximumFractionDigits: 2 });
 function valuePanel() {
   const v = state.libValue;
   if (!v) { if (!state.libValueLoading) loadLibValue(); return '<div class="skeleton" style="height:160px"></div>'; }
   if (!v.count) return '<div class="empty">Aucun prix Steam trouvé pour tes jeux (hors ligne ?).</div>';
+  // prices and currency of the player's country (Steam's own prices there)
+  const fmtEur = (x) => fmtMoney(x, v.currency || 'EUR');
   const best = v.items.filter((x) => x.perHour !== null).sort((a, b) => a.perHour - b.perHour);
   const top = best[0] && byId(best[0].gameId);
-  const perH = (x) => (x < 0.01 ? '< 0,01 €' : fmtEur(x));
+  const perH = (x) => (x < 0.01 ? `< ${fmtEur(0.01)}` : fmtEur(x));
   return `<div class="val-kpis">
       <div><span>Valeur estimée</span><b>${fmtEur(v.total)}</b><small>${v.count} jeux Steam${v.free ? ` dont ${v.free} gratuit${v.free > 1 ? 's' : ''}` : ''}</small></div>
       <div><span>Coût moyen par heure</span><b>${v.perHour !== null ? perH(v.perHour) : '—'}</b><small>sur tes jeux payants</small></div>
     </div>
     ${top ? `<p class="val-fun"><span>${esc(top.name)} t'a coûté</span> <b>${perH(best[0].perHour)}</b> <span>de l'heure 😄</span></p>` : ''}
     ${best.length ? `<div class="val-list"><small>Meilleur rapport heures / prix</small>${best.slice(0, 5).map((x) => { const g = byId(x.gameId); return g ? `<div class="val-row" data-open="${esc(g.id)}">${coverHtml(g, 'thumb')}<span title="${esc(g.name)}">${esc(g.name)}</span><em>${fmtEur(x.price)} · ${Math.round(x.hours)} h</em><b>${perH(x.perHour)}/h</b></div>` : ''; }).join('')}</div>` : ''}
-    <p class="val-note">Prix Steam actuels en France, hors promotions. Les jeux des autres plateformes ne sont pas comptés.</p>`;
+    <p class="val-note">Prix Steam actuels · <span translate="no">${esc(countryName(v.country || 'FR'))}</span> · hors promotions. Les jeux des autres plateformes ne sont pas comptés.</p>`;
 }
 async function loadLibValue(force = false) {
   state.libValueLoading = true;
@@ -1866,7 +1940,7 @@ function showcaseSection(list) {
         ${showcaseMedal(s, 'lg')}
         <b>${esc(s.name)}</b>
         <span class="sc-tier">${esc(s.tierName || '')}</span>
-        ${s.at ? `<small>${new Date(s.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</small>` : ''}
+        ${s.at ? `<small>${fmtDayNum(s.at, true)}</small>` : ''}
       </button>` : `
       <button class="sc-slot empty" data-edit-profile title="Choisir un succès">
         <span class="plus"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
@@ -3458,7 +3532,7 @@ function trophyCard(it) {
       <span class="tro-rar ${it.secret ? 'secret' : it.rarity}">${it.secret ? 'Secret · ' : ''}${esc(RARITY[it.rarity].name)}</span>
       <b class="tro-name">${esc(it.name)}</b>
       <span class="tro-desc">${esc(t.desc)}</span>
-      ${got ? `<span class="tro-date">Obtenu le ${new Date(t.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</span>`
+      ${got ? `<span class="tro-date">Obtenu le ${fmtDayNum(t.at, true)}</span>`
         : it.hidden ? '<span class="tro-date">Indice : explore Linkgeek…</span>'
           : `<div class="tro-prog"><div class="a-bar"><i class="${it.rarity}" style="width:${pct.toFixed(1)}%"></i></div><span>${fmtAch(it.value, it.unit)} / ${fmtAch(t.goal, it.unit)}</span></div>`}
     </div>
@@ -3718,6 +3792,7 @@ function viewCards() {
         <div class="ch-odds">${CARD_ORDER.map((r) => `<span class="r-${r}"><i>${'◆'.repeat(CARD_RAR[r].gems)}</i>${esc(CARD_RAR[r].name)} ${fmtPct(c.rarities[r].pct)}</span>`).join('')}<span class="skin-odd">◆ Skin ${fmtPct(c.skinPct || 10)}</span><span class="holo-odd">✦ Holo ${fmtPct(c.holoPct)}</span></div>
       </div>
     </div>
+    ${dailyCardSection(c)}
     ${fusionSection(c)}
     ${CARD_ORDER.map((r) => {
       const list = c.cards.filter((x) => x.rarity === r);
@@ -3725,6 +3800,28 @@ function viewCards() {
         <div class="tcard-grid">${list.map((x) => collectionCard(x)).join('')}</div></section>`;
     }).join('')}
   </div>`;
+}
+
+/** Carte du jour: one epic / legendary / mythic card with a better drop rate today (same for every player). */
+function dailyCardSection(c) {
+  const d = c.dailyCard;
+  const card = d && c.cards.find((x) => x.id === d.id);
+  if (!card) return '';
+  const r = CARD_RAR[card.rarity];
+  const ms = Math.max(0, d.endsAt - Date.now());
+  const wait = `${Math.floor(ms / 3600000)} h ${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}`;
+  const have = card.n > 0 ? `Dans ta collection : ×${card.n}` : 'Pas encore dans ta collection';
+  return `<section class="section cotd r-${card.rarity}">
+    <div class="cotd-card">${tradingCard(card, { forceShow: true, variant: card.holo ? 'holo' : 'skin', noCount: true })}</div>
+    <div class="cotd-body">
+      <span class="cotd-kicker">★ Carte du jour · change dans ${esc(wait)}</span>
+      <h2>${esc(card.name)}</h2>
+      <span class="cv-rar r-${card.rarity}"><i>${'◆'.repeat(r.gems)}</i>${esc(r.name)}</span>
+      <p class="cotd-boost"><b>+${fmtPct(d.boost)}</b> de chance de l'obtenir à chaque carte tirée aujourd'hui, en plus de ses chances normales.</p>
+      <span class="cotd-have ${card.n > 0 ? 'on' : ''}">${esc(have)}</span>
+      <p class="cotd-note">Chaque jour, une nouvelle carte est choisie au hasard, la même pour tous les joueurs : ${CARD_ORDER.filter((k) => d.odds[k]).map((k) => `${esc(CARD_RAR[k].name)} ${fmtPct(d.odds[k])} (+${fmtPct(d.boosts[k])} par carte)`).join(' · ')}.</p>
+    </div>
+  </section>`;
 }
 
 /** Fusion des doubles: 15 commons → 1 rare, 20 rares → 1 epic (the first copy of each version is always kept). */
@@ -3803,7 +3900,7 @@ async function openBoosterFlow() {
   const root = $('#modal-root');
   root.innerHTML = `<div class="modal-bg booster-bg"><div class="booster-modal">
     <div class="bm-pack">${$('.booster-pack') ? $('.booster-pack').outerHTML.replace('data-open-booster', '') : ''}</div>
-    <div class="bm-row" hidden>${pulls.map((p) => `<div class="flip r-${p.card.rarity}"><div class="flip-in"><div class="flip-face back">${CARD_BACK}</div><div class="flip-face front">${tradingCard(p.card, { forceShow: true, variant: p.holo ? 'holo' : p.skin ? 'skin' : 'base', noCount: true, badge: p.isNew ? 'Nouvelle !' : p.newHolo ? 'Nouvelle holo !' : p.newSkin ? 'Nouveau skin !' : '' })}</div></div></div>`).join('')}</div>
+    <div class="bm-row" hidden>${pulls.map((p) => `<div class="flip r-${p.card.rarity} ${p.daily ? 'daily' : ''}"><div class="flip-in"><div class="flip-face back">${CARD_BACK}</div><div class="flip-face front">${tradingCard(p.card, { forceShow: true, variant: p.holo ? 'holo' : p.skin ? 'skin' : 'base', noCount: true, badge: p.isNew ? 'Nouvelle !' : p.newHolo ? 'Nouvelle holo !' : p.newSkin ? 'Nouveau skin !' : '' })}${p.daily ? '<span class="tc-daily">★ Carte du jour</span>' : ''}</div></div></div>`).join('')}</div>
     <div class="bm-foot" hidden>
       <span class="bm-sum"></span>
       <div class="bm-btns"><button class="ghost" data-booster-close>Voir ma collection</button><button class="btn-play" data-booster-again>${COIN}Ouvrir un autre · ${fmtCoins(r.cards.price)}</button></div>
@@ -3824,7 +3921,8 @@ async function openBoosterFlow() {
   const holos = r.pulls.filter((p) => p.holo).length;
   const skins = r.pulls.filter((p) => p.skin && !p.holo).length;
   const foot = root.querySelector('.bm-foot');
-  foot.querySelector('.bm-sum').textContent = `${news ? `${news} nouvelle${news > 1 ? 's' : ''} carte${news > 1 ? 's' : ''}` : 'Aucune nouvelle carte'}${skins ? ` · ${skins} avec skin` : ''}${holos ? ` · ${holos} holo${holos > 1 ? 's' : ''}` : ''} · ${r.cards.owned} / ${r.cards.total} dans ta collection`;
+  const dailies = r.pulls.filter((p) => p.daily).length;
+  foot.querySelector('.bm-sum').textContent = `${news ? `${news} nouvelle${news > 1 ? 's' : ''} carte${news > 1 ? 's' : ''}` : 'Aucune nouvelle carte'}${skins ? ` · ${skins} avec skin` : ''}${holos ? ` · ${holos} holo${holos > 1 ? 's' : ''}` : ''}${dailies ? ` · ★ ${dailies > 1 ? `${dailies}× ` : ''}la carte du jour` : ''} · ${r.cards.owned} / ${r.cards.total} dans ta collection`;
   const again = foot.querySelector('[data-booster-again]');
   if (r.cards.gifts > 0) again.innerHTML = `🎁 Ouvrir un autre booster offert (${r.cards.gifts})`;
   else if (r.cards.leftToday === 0) { again.classList.add('disabled'); again.title = `Limite de ${r.cards.dailyLimit} boosters par jour atteinte`; again.lastChild.textContent = 'Limite du jour atteinte'; }
@@ -3889,7 +3987,7 @@ function viewAchievements() {
       <div class="ach2-hero-main">
         <small>Rang de chasseur de trophées</small>
         <h2>${esc(COLLECTOR_RANKS[rankIdx][1])}</h2>
-        <p>${nextRank ? `Encore <b>${ptsToNext.toLocaleString('fr-FR')} pts</b> pour devenir <b>${esc(nextRank[1])}</b>` : 'Tu as atteint le rang le plus haut 👑'}</p>
+        <p>${nextRank ? `<b>Encore ${ptsToNext.toLocaleString('fr-FR')} pts pour devenir ${esc(nextRank[1])}</b>` : 'Tu as atteint le rang le plus haut 👑'}</p>
         <div class="ach2-score"><b>${a.points.toLocaleString('fr-FR')}</b> / ${a.maxPoints.toLocaleString('fr-FR')} points</div>
         <div class="ach2-ranks">${COLLECTOR_RANKS.map(([min, n], i) => `<span class="${i < rankIdx ? 'past' : i === rankIdx ? 'cur' : ''}" title="${min} %">${esc(n)}</span>`).join('')}</div>
       </div>
@@ -4039,6 +4137,7 @@ function settingsSection(s) {
           <button class="ghost danger" data-acc="signout">Se déconnecter</button>
         </div>
         <p class="set-note">Linkgeek garde ton nom, ton e-mail et ta photo${s.online && s.online.signedIn ? ', ainsi qu\'une clé de session chiffrée pour le mode en ligne' : ''}. Aucun mot de passe n'est conservé.</p>
+        ${s.online && s.online.signedIn ? discordLinkBlock() : ''}
         ${s.firebase && s.firebase.configured && !(s.online && s.online.signedIn) ? `<div class="set-warn">Le mode en ligne est activé mais ta session n'est pas ouverte. <button class="link" data-acc="signin">Se reconnecter avec Google</button> pour retrouver tes amis.</div>` : ''}
         ${s.online && s.online.signedIn ? `<div class="set-danger">
           <div><b>Supprimer mon compte en ligne</b><span>Efface du serveur ton profil, ton code ami, ton statut, tes amitiés, tes demandes d'ami et tes cadeaux en attente, puis ton compte Firebase. Ton temps de jeu et tes réglages restent sur ce PC.</span></div>
@@ -4120,7 +4219,7 @@ function settingsSection(s) {
         <div class="set-row"><div><b>Ne pas déranger</b><span>Coupe les notifications d'amis. « Parties classées » : seulement pendant les jeux que tu as marqués comme tels (page du jeu → « Partie classée »)${(s.dndGames || []).length ? ` · ${s.dndGames.length} jeu${s.dndGames.length > 1 ? 'x' : ''} marqué${s.dndGames.length > 1 ? 's' : ''}` : ''}.</span></div>
           <div class="segmented sm">${[['off', 'Jamais'], ['competitive', 'Parties classées'], ['playing', 'En jeu'], ['always', 'Toujours']].map(([k, l]) => `<button class="${s.dnd === k ? 'active' : ''}" data-setting="dnd" data-value="${k}">${l}</button>`).join('')}</div></div>
         <div class="set-row"><div><b>Langue</b><span>Langue de l'interface de Linkgeek.</span></div>
-          <div class="segmented sm">${[['fr', 'Français'], ['en', 'English']].map(([k, l]) => `<button class="${s.language === k ? 'active' : ''}" data-setting="language" data-value="${k}">${l}</button>`).join('')}</div></div>
+          <div class="segmented sm lang-pick" translate="no">${[['fr', 'Français'], ['en', 'English'], ['es', 'Español'], ['de', 'Deutsch'], ['ru', 'Русский']].map(([k, l]) => `<button class="${s.language === k ? 'active' : ''}" data-setting="language" data-value="${k}">${l}</button>`).join('')}</div></div>
         <div class="set-row"><div><b>Revoir la présentation</b><span>Les 3 étapes affichées au premier lancement.</span></div><button class="ghost" data-onb="show">Revoir</button></div>
       </div>
       <h3 class="set-h3">Mode TV / manette</h3>
@@ -4260,7 +4359,7 @@ function dashSpark(hist) {
   const pts = hist.map((h) => `${((h.at - t0) / Math.max(1, t1 - t0) * W).toFixed(1)},${(Hh - 6 - h.n / max * (Hh - 16)).toFixed(1)}`);
   return `<svg class="dash-spark" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">
     <polygon points="0,${Hh} ${pts.join(' ')} ${W},${Hh}" class="area"/><polyline points="${pts.join(' ')}" class="line"/></svg>
-    <div class="dash-axis"><span>${new Date(t0).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span><span>max ${max}</span><span>${new Date(t1).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span></div>`;
+    <div class="dash-axis"><span>${new Date(t0).toLocaleTimeString(userLoc(), { hour: '2-digit', minute: '2-digit' })}</span><span>max ${max}</span><span>${new Date(t1).toLocaleTimeString(userLoc(), { hour: '2-digit', minute: '2-digit' })}</span></div>`;
 }
 function dashBars(list, empty, label = (x) => esc(x.name)) {
   if (!list || !list.length) return `<p class="set-note">${empty}</p>`;
@@ -4312,7 +4411,7 @@ function dashboardSection(s) {
         <div class="dash-mini"><span>Amitiés <b>${nf(d.friends.pairs)}</b></span><span>Amis par joueur <b>${String(d.friends.avg).replace('.', ',')}</b></span><span>Sans ami <b>${nf(d.friends.lonely)}</b></span><span>Réseaux reliés <b>${nf(d.play.socials)}</b></span></div>
         <h3 class="set-h3 sm">Titres équipés</h3>${dashBars(d.titles, 'Aucun titre équipé.', titleName)}</div>
     </div>
-    <p class="set-note">Dernière mise à jour : ${new Date(d.at).toLocaleTimeString('fr-FR')}. Seuls des totaux sont affichés : aucun nom ni adresse de joueur. « En ligne » compte les joueurs dont Linkgeek a donné signe de vie depuis moins de 3 minutes.</p>`;
+    <p class="set-note">Dernière mise à jour : ${new Date(d.at).toLocaleTimeString(userLoc())}. Seuls des totaux sont affichés : aucun nom ni adresse de joueur. « En ligne » compte les joueurs dont Linkgeek a donné signe de vie depuis moins de 3 minutes.</p>`;
 }
 
 /* ---- Admin: trophy pickers ---- */
@@ -4503,7 +4602,9 @@ async function toggleDndMoon() {
   if (state.view === 'settings') render(true);
 }
 // Notifications the app has no toast of its own for (friend online, wheel, boosters), Linkgeek in front
-if (api.onNotifyInApp) api.onNotifyInApp((n) => toast(`${n.icon ? `${n.icon} ` : ''}${n.title}${n.body ? ` · ${n.body}` : ''}`));
+// title and body are translated one by one (joined, the sentence would match no translation)
+const trPart = (s) => (s && typeof linkgeekTr === 'function' ? linkgeekTr(s) : s);
+if (api.onNotifyInApp) api.onNotifyInApp((n) => toast(`${n.icon ? `${n.icon} ` : ''}${n.raw ? n.title : trPart(n.title)}${n.body ? ` · ${n.raw ? n.body : trPart(n.body)}` : ''}`));
 if (api.onGameMode) api.onGameMode((m) => {
   state.inGame = !!m.on;
   state.dnd = !!m.dnd;
@@ -4560,6 +4661,7 @@ function fxFrame(t) {
 
 async function loadSettings() {
   state.settings = await api.getSettings();
+  window.linkgeekRegion = state.settings.region; // date / time / currency format of the player's country
   applyTheme(state.settings.theme);
   applyLanguage(state.settings.language);
   if (state.view === 'settings') render(true);
@@ -4825,6 +4927,12 @@ document.addEventListener('click', async (e) => {
   if (ct && !ct.closest('#modal-root')) return collectionsClick(ct);
   if (e.target.closest('[data-reco-refresh]')) { if (!state.recoLoading) loadReco(true); return; }
   if (e.target.closest('[data-board-refresh]')) { loadWeekly(); return; }
+  const bs = e.target.closest('[data-board-scope]');
+  if (bs) {
+    if ((state.boardScope || 'world') === bs.dataset.boardScope) return;
+    state.boardScope = bs.dataset.boardScope; state.weekly = null; state.weeklyLoading = false;
+    render(true); loadWeekly(); return;
+  }
   if (e.target.closest('[data-cmp-friends]')) {
     state.cmpFriends = !state.cmpFriends;
     try { localStorage.setItem('linkgeek-cmp-friends', state.cmpFriends ? '1' : '0'); } catch { /* ignore */ }

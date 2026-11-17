@@ -9,8 +9,15 @@
     el.classList.add('out');
     setTimeout(() => el.remove(), 360);
   }
+  // texts arrive in French (or already in English): translated here for es / de / ru
+  const trFor = (lang) => {
+    const p = lang && lang !== 'fr' && lang !== 'en' && window.LINKGEEK_LANGS && window.LINKGEEK_LANGS[lang];
+    return p ? p.tr : (s) => s;
+  };
   window.lgNotify = (n) => {
-    const d = Math.max(2000, Math.min(15000, Number(n.duration) || 5500));
+    const t = trFor(n.lang);
+    n = { ...n, kicker: n.kicker ? t(n.kicker) : n.kicker, title: n.raw ? n.title : t(n.title), body: n.raw || !n.body ? n.body : t(n.body) };
+    const d =Math.max(2000, Math.min(15000, Number(n.duration) || 5500));
     const el = document.createElement('div');
     el.className = 'n';
     if (/^\d{1,3},\d{1,3},\d{1,3}$/.test(n.accent || '')) el.style.setProperty('--ac', n.accent);

@@ -18,7 +18,7 @@ function chatAvatar(f, cls = '') {
   const n = f && f.name ? f.name : '?';
   return `<span class="ch-av ${cls}" style="--h:${hue(n)}">${esc(initials(n))}</span>`;
 }
-const chatTime = (t) => new Date(t).toLocaleTimeString(state.settings && state.settings.language === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' });
+const chatTime = (t) => new Date(t).toLocaleTimeString(typeof linkgeekLocale === 'function' ? linkgeekLocale() : 'fr-FR', { hour: '2-digit', minute: '2-digit' });
 function chatDay(t) {
   const d = new Date(t), now = new Date();
   const same = (a, b) => a.toDateString() === b.toDateString();

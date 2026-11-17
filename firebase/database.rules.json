@@ -307,10 +307,34 @@
         ".validate": false
       }
     },
+    "discordLinks": {
+      ".indexOn": ["code"],
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "!newData.exists() || newData.hasChildren(['code', 'at'])",
+        "code": {
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{6}$/)"
+        },
+        "at": {
+          ".validate": "newData.val() === now"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "discord": {
+      ".indexOn": ["id"],
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid && !newData.exists()"
+      }
+    },
     "weekly": {
       "$week": {
         ".read": "auth != null",
-        ".indexOn": ["hours"],
+        ".indexOn": ["hours", "country"],
         "$uid": {
           ".write": "auth != null && auth.uid === $uid && $week.matches(/^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$/)",
           ".validate": "newData.hasChildren(['name', 'hours', 'at'])",
@@ -331,6 +355,9 @@
           },
           "hours": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 168"
+          },
+          "country": {
+            ".validate": "newData.isString() && newData.val().matches(/^[A-Z][A-Z]$/)"
           },
           "at": {
             ".validate": "newData.val() === now"

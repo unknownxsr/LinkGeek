@@ -106,7 +106,11 @@ contextBridge.exposeInMainWorld('nexus', {
   adminSetRanks: (list) => ipcRenderer.invoke('admin:setRanks', list),
   adminGrant: (g) => ipcRenderer.invoke('admin:grant', g),
   adminStats: () => ipcRenderer.invoke('admin:stats'),
-  weeklyBoard: () => ipcRenderer.invoke('board:weekly'),
+  weeklyBoard: (scope) => ipcRenderer.invoke('board:weekly', scope),
+  // compte Discord lié (rôles de rang sur le serveur Linkgeek)
+  discordLinkStatus: () => ipcRenderer.invoke('discordLink:status'),
+  discordLinkStart: () => ipcRenderer.invoke('discordLink:start'),
+  discordUnlink: () => ipcRenderer.invoke('discordLink:unlink'),
   getMyCard: () => ipcRenderer.invoke('profile:card'),
   deleteOnlineAccount: () => ipcRenderer.invoke('account:deleteOnline'),
   getCollections: () => ipcRenderer.invoke('collections:get'),

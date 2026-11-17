@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-no-auto-lang>
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
@@ -11,6 +11,11 @@
   <!-- Notifications shown on top of everything (games included), top-right of the screen.
        Filled by main.js (src/notifier.js) through window.lgNotify(). Click-through window. -->
   <div id="stack"></div>
+  <!-- translations: each notification is translated from French with its own `lang` -->
+  <script src="i18n.js"></script>
+  <script src="i18n-es.js"></script>
+  <script src="i18n-de.js"></script>
+  <script src="i18n-ru.js"></script>
   <script src="notify.js"></script>
 </body>
 </html>

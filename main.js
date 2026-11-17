@@ -73,7 +73,33 @@ let quitting = false;
  * or it is minimised / in the tray), they show at the top-right of the screen, on top of
  * the game. When Linkgeek is in front, the app shows its own toast instead. */
 const NOTIF_TYPES = ['trophy', 'friendOnline', 'friendGame', 'invite', 'message', 'duel', 'challenge', 'level', 'wheel', 'packs', 'update'];
+// Interface languages: French is the original; 'en' texts are written here with L(), the other
+// languages are translated from the French by the notification window (renderer/i18n-xx.js).
+const LANGS = ['fr', 'en', 'es', 'de', 'ru'];
 const L = (fr, en) => (store && store.data.settings.language === 'en' ? en : fr);
+const uiLang = () => (store && LANGS.includes(store.data.settings.language) ? store.data.settings.language : 'fr');
+/** Windows display language, e.g. 'es-ES' (after app ready). */
+function systemLanguage() {
+  if (process.env.LINKGEEK_SYSLANG) return process.env.LINKGEEK_SYSLANG; // tests
+  try { return (app.getPreferredSystemLanguages && app.getPreferredSystemLanguages()[0]) || app.getLocale() || 'fr-FR'; } catch { return 'fr-FR'; }
+}
+/** Language for a first launch: the Windows language if Linkgeek has it, otherwise English. */
+function detectLanguage() {
+  const l = systemLanguage().toLowerCase().split(/[-_]/)[0];
+  return LANGS.includes(l) ? l : 'en';
+}
+/**
+ * Country of the player (2 letters, e.g. 'FR', 'US', 'BR'), from the Windows regional format
+ * (then the display language). Used for the currency, the date / time format and the
+ * country leaderboard.
+ */
+function systemRegion() {
+  const pick = (loc) => { const m = /[-_]([A-Za-z]{2})(?:$|[-_@.])/.exec(String(loc || '')); return m ? m[1].toUpperCase() : null; };
+  if (/^[A-Z]{2}$/.test(process.env.LINKGEEK_REGION || '')) return process.env.LINKGEEK_REGION; // tests
+  let r = null;
+  try { r = pick(app.getSystemLocale && app.getSystemLocale()); } catch { /* old Electron */ }
+  return r || pick(systemLanguage()) || 'FR';
+}
 function notifOn(type) {
   const s = store.data.settings;
   if (type === 'friendGame') return s.notifyFriends !== false; // older setting, same switch
@@ -89,7 +115,7 @@ function notify(type, n, inApp = false) {
   const front = win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused();
   if (front) { if (inApp) send('notify:inapp', { type, ...n }); return; }
   if (!notifier) notifier = new Notifier();
-  notifier.show({ type, ...n });
+  notifier.show({ type, ...n, lang: uiLang() });
 }
 const TIER_ACCENT = { bronze: '205,127,50', silver: '200,210,222', gold: '242,185,44', platinum: '159,216,255' };
 const localDay = (t = Date.now()) => { const d = new Date(t); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
@@ -138,7 +164,7 @@ function chatEvent(kind, e) {
   if (e.quiet) return;
   const front = win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused();
   if (front && e.open) return; // already reading this conversation
-  notify('message', { kicker: L('Nouveau message', 'New message'), title: e.name, body: e.text, img: e.photo || '', icon: '💬', round: true, accent: '79,179,255', duration: 7000 }, true);
+  notify('message', { kicker: L('Nouveau message', 'New message'), title: e.name, body: e.text, img: e.photo || '', icon: '💬', round: true, accent: '79,179,255', duration: 7000, raw: true }, true);
 }
 
 /** News from src/social.js → window + notifications (top-right when Linkgeek is not in front). */
@@ -310,13 +336,25 @@ function createTray() {
     : nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png')).resize({ width: 16, height: 16 });
   tray = new Tray(icon);
   tray.setToolTip('Linkgeek');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Ouvrir Linkgeek', click: () => { win.show(); win.focus(); } },
-    { label: 'Mode TV / manette', click: () => { win.show(); win.focus(); send('tv:mode', true); } },
-    { type: 'separator' },
-    { label: 'Quitter', click: () => { quitting = true; app.quit(); } },
-  ]));
+  buildTrayMenu();
   tray.on('click', () => { win.show(); win.focus(); });
+}
+/** Tray menu in the interface language (rebuilt when the language changes). */
+const TRAY_TEXT = {
+  fr: ['Ouvrir Linkgeek', 'Mode TV / manette', 'Quitter'],
+  en: ['Open Linkgeek', 'TV / controller mode', 'Quit'],
+  es: ['Abrir Linkgeek', 'Modo TV / mando', 'Salir'],
+  de: ['Linkgeek öffnen', 'TV- / Controller-Modus', 'Beenden'],
+  ru: ['Открыть Linkgeek', 'Режим ТВ / геймпад', 'Выход'],
+};
+function buildTrayMenu() {
+  const t = TRAY_TEXT[store && store.data.settings.language] || TRAY_TEXT.fr;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: t[0], click: () => { win.show(); win.focus(); } },
+    { label: t[1], click: () => { win.show(); win.focus(); send('tv:mode', true); } },
+    { type: 'separator' },
+    { label: t[2], click: () => { quitting = true; app.quit(); } },
+  ]));
 }
 
 async function diskInfo(games) {
@@ -488,39 +526,47 @@ function getRecords() {
 }
 
 /**
- * Estimated value of the Steam library: full Steam price (France, without
- * discounts) of each Steam game, cached 7 days. Only app ids are sent to Steam.
+ * Estimated value of the Steam library: full Steam price (in the player's country and
+ * currency, without discounts) of each Steam game, cached 7 days. Only app ids and the
+ * country code are sent to Steam.
  */
 const PRICE_TTL = 7 * 86400000;
 async function libraryValue(force = false) {
   const cache = store.data.libPrices || (store.data.libPrices = {});
+  const cc = systemRegion().toLowerCase();
   const steam = library.games().filter((g) => g.source === 'steam' && !g.hidden);
   const ids = steam.map((g) => g.id.split(':')[1]).filter((id) => /^\d+$/.test(id));
-  const todo = ids.filter((id) => force || !cache[id] || Date.now() - cache[id].at > PRICE_TTL);
+  // prices of another country (the player moved, or an older version priced everything in France)
+  const todo = ids.filter((id) => force || !cache[id] || Date.now() - cache[id].at > PRICE_TTL || (cache[id].cc || 'fr') !== cc);
   for (let i = 0; i < todo.length; i += 40) {
     const chunk = todo.slice(i, i + 40);
     try {
-      const r = await fetch(`https://store.steampowered.com/api/appdetails?appids=${chunk.join(',')}&cc=fr&filters=price_overview`, { signal: AbortSignal.timeout(15000) });
+      const r = await fetch(`https://store.steampowered.com/api/appdetails?appids=${chunk.join(',')}&cc=${cc}&filters=price_overview`, { signal: AbortSignal.timeout(15000) });
       const j = await r.json();
       for (const id of chunk) {
         const d = j && j[id];
         const p = d && d.success && d.data && d.data.price_overview;
-        cache[id] = p ? { at: Date.now(), cents: p.initial || p.final || 0, currency: p.currency || 'EUR' }
-          : { at: Date.now(), cents: d && d.success ? 0 : null, free: !!(d && d.success) };
+        cache[id] = p ? { at: Date.now(), cc, cents: p.initial || p.final || 0, currency: p.currency || 'EUR' }
+          : { at: Date.now(), cc, cents: d && d.success ? 0 : null, free: !!(d && d.success) };
       }
     } catch { /* offline: use what is cached */ }
   }
   store.save();
+  // the currency most prices are in (Steam answers in the country's currency, or USD / EUR)
+  const counts = {};
+  for (const id of ids) { const c = cache[id]; if (c && c.cents > 0 && c.currency) counts[c.currency] = (counts[c.currency] || 0) + 1; }
+  const currency = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || 'EUR';
   const items = steam.map((g) => {
     const c = cache[g.id.split(':')[1]];
     if (!c || c.cents === null || c.cents === undefined) return null;
+    if (c.cents > 0 && c.currency && c.currency !== currency) return null; // never add two currencies
     const price = c.cents / 100;
     const hours = (g.playtimeSec || 0) / 3600;
     return { gameId: g.id, price, free: !c.cents, hours, perHour: hours >= 1 && price > 0 ? price / hours : null };
   }).filter(Boolean);
   const total = items.reduce((a, x) => a + x.price, 0);
   const paidHours = items.filter((x) => x.price > 0).reduce((a, x) => a + x.hours, 0);
-  return { total, count: items.length, unknown: steam.length - items.length, free: items.filter((x) => x.free).length, perHour: paidHours >= 1 ? total / paidHours : null, items, at: Date.now() };
+  return { total, currency, country: cc.toUpperCase(), count: items.length, unknown: steam.length - items.length, free: items.filter((x) => x.free).length, perHour: paidHours >= 1 ? total / paidHours : null, items, at: Date.now() };
 }
 
 /* ---------------- Social links ---------------- */
@@ -952,7 +998,8 @@ function getSettings() {
     dndActive: store ? dndActive() : false,
     weeklyBoard: s.weeklyBoard !== false,
     discord: { ...discordConfig(), connected: discord.ready },
-    language: s.language === 'en' ? 'en' : 'fr',
+    language: LANGS.includes(s.language) ? s.language : 'fr',
+    region: systemRegion(), // country (currency, date / time format, country leaderboard)
     onboarded: !!s.onboarded,
     update: updater ? { ready: updater.ready || null } : null,
     hiddenCount: store.data.hidden.length,
@@ -1189,7 +1236,7 @@ function registerIpc() {
       s.weeklyBoard = patch.weeklyBoard;
       if (online && online.session) { online.lastWeekly = ''; online.publishWeekly().catch(() => {}); }
     }
-    if (patch && (patch.language === 'fr' || patch.language === 'en')) s.language = patch.language;
+    if (patch && LANGS.includes(patch.language)) { s.language = patch.language; if (tray) buildTrayMenu(); }
     if (patch && typeof patch.onboarded === 'boolean') s.onboarded = patch.onboarded;
     if (patch && patch.discord && typeof patch.discord === 'object') {
       const cur = s.discord || {};
@@ -1325,13 +1372,22 @@ function registerIpc() {
   });
 
   /** Global leaderboard of the week (top 10 + my rank). null when offline. */
-  ipcMain.handle('board:weekly', async () => {
+  /* ---- Discord account link: Linkgeek ranks become roles on the Discord server (discord-bot/) ---- */
+  const needOnline = () => { if (!online || !online.session) throw new Error('Connecte-toi au mode en ligne pour lier ton compte Discord'); };
+  ipcMain.handle('discordLink:status', () => (online && online.session ? online.discordLinkStatus() : { signedIn: false }));
+  ipcMain.handle('discordLink:start', () => { needOnline(); return online.discordLinkStart(); });
+  ipcMain.handle('discordLink:unlink', () => { needOnline(); return online.discordUnlink(); });
+
+  // scope: 'world' (every player) or 'country' (players of my country only)
+  ipcMain.handle('board:weekly', async (_e, scope) => {
     const wk = weekInfo();
-    const base = { week: wk.week, start: wk.start, myHours: wk.hours, enabled: store.data.settings.weeklyBoard !== false };
+    const country = systemRegion();
+    const byCountry = scope === 'country';
+    const base = { week: wk.week, start: wk.start, myHours: wk.hours, enabled: store.data.settings.weeklyBoard !== false, scope: byCountry ? 'country' : 'world', country };
     if (!online || !online.session) return { ...base, offline: true, rows: [] };
     await online.publishWeekly().catch(() => {});
     try {
-      const r = await online.weeklyTop(wk.week, base.enabled ? wk.hours : 0);
+      const r = await online.weeklyTop(wk.week, base.enabled ? wk.hours : 0, 10, byCountry ? country : null);
       return { ...base, ...r };
     } catch (e) {
       return { ...base, rows: [], error: /refus|denied|401|403/i.test(String(e && e.message)) ? 'rules' : 'network' };
@@ -1451,10 +1507,14 @@ function registerIpc() {
   ipcMain.handle('share:info', () => ({ url: DOWNLOAD_URL, code: online && online.code, signedIn: !!(online && online.session), ...social.state().referral }));
   ipcMain.handle('share:copy', (_e, what) => {
     const code = online && online.code;
-    const text = what === 'message'
-      ? L(`Rejoins-moi sur Linkgeek, le launcher qui regroupe tous tes jeux 🎮\nTélécharge-le ici : ${DOWNLOAD_URL}${code ? `\nPuis entre mon code ami ${code} dans Amis : on reçoit chacun un booster gratuit !` : ''}`,
-        `Join me on Linkgeek, the launcher that brings all your games together 🎮\nDownload it here: ${DOWNLOAD_URL}${code ? `\nThen enter my friend code ${code} in Friends: we both get a free booster!` : ''}`)
-      : DOWNLOAD_URL;
+    const SHARE = {
+      fr: [`Rejoins-moi sur Linkgeek, le launcher qui regroupe tous tes jeux 🎮\nTélécharge-le ici : ${DOWNLOAD_URL}`, `\nPuis entre mon code ami ${code} dans Amis : on reçoit chacun un booster gratuit !`],
+      en: [`Join me on Linkgeek, the launcher that brings all your games together 🎮\nDownload it here: ${DOWNLOAD_URL}`, `\nThen enter my friend code ${code} in Friends: we both get a free booster!`],
+      es: [`Únete a mí en Linkgeek, el launcher que reúne todos tus juegos 🎮\nDescárgalo aquí: ${DOWNLOAD_URL}`, `\nLuego introduce mi código de amigo ${code} en Amigos: ¡cada uno recibe un sobre gratis!`],
+      de: [`Komm zu mir auf Linkgeek, den Launcher, der all deine Spiele vereint 🎮\nHier herunterladen: ${DOWNLOAD_URL}`, `\nGib dann meinen Freundescode ${code} unter Freunde ein: Wir bekommen beide einen kostenlosen Booster!`],
+      ru: [`Присоединяйся ко мне в Linkgeek — лаунчере, который собирает все твои игры 🎮\nСкачать: ${DOWNLOAD_URL}`, `\nПотом введи мой код друга ${code} во вкладке «Друзья»: каждый из нас получит бесплатный бустер!`],
+    }[uiLang()];
+    const text = what === 'message' ? SHARE[0] + (code ? SHARE[1] : '') : DOWNLOAD_URL;
     clipboard.writeText(text);
     return true;
   });
@@ -1649,6 +1709,8 @@ app.whenReady().then(async () => {
 
   migrateLegacyData();
   store = new Store(app.getPath('userData'));
+  // first launch: the interface takes the language of Windows (never changed after that)
+  if (!LANGS.includes(store.data.settings.language)) { store.data.settings.language = detectLanguage(); store.save(); }
   library = new Library(store, async (exe) => (await app.getFileIcon(exe, { size: 'large' })).toDataURL());
   covers = new Covers(store);
   library.covers = covers;
@@ -1676,7 +1738,7 @@ app.whenReady().then(async () => {
     },
     loadAvatarCache: () => store.data.friendAvatars || {},
     saveAvatarCache: (c) => { store.data.friendAvatars = c; store.save(); },
-    getWeekly:() => ({ ...weekInfo(), enabled: store.data.settings.weeklyBoard !== false }),
+    getWeekly:() => ({ ...weekInfo(), enabled: store.data.settings.weeklyBoard !== false, country: systemRegion() }),
     onWeeklyPublished: (w) => {
       const l = store.data.weeklyWeeks || (store.data.weeklyWeeks = []);
       if (!l.includes(w)) { l.push(w); if (l.length > 60) l.shift(); store.save(); }
@@ -1819,7 +1881,7 @@ app.whenReady().then(async () => {
   // Paramètres → Notifications → « Tester »: shows one on top of everything, even with Linkgeek in front
   ipcMain.handle('notify:test', () => {
     if (!notifier) notifier = new Notifier();
-    notifier.show({ type: 'trophy', kicker: L('Trophée Or débloqué', 'Gold trophy unlocked'), title: L('Exemple de notification', 'Sample notification'), body: L('Elle s\'affiche ici, même par-dessus tes jeux.', 'It shows up here, even on top of your games.'), icon: '🏆', accent: TIER_ACCENT.gold });
+    notifier.show({ type: 'trophy', kicker: L('Trophée Or débloqué', 'Gold trophy unlocked'), title: L('Exemple de notification', 'Sample notification'), body: L('Elle s\'affiche ici, même par-dessus tes jeux.', 'It shows up here, even on top of your games.'), icon: '🏆', accent: TIER_ACCENT.gold, lang: uiLang() });
     return true;
   });
   ipcMain.handle('update:install', () => updater.install());

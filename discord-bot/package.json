@@ -1,0 +1,12 @@
+{
+  "name": "linkgeek-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot Discord du serveur LinkGeek",
+  "main": "bot.js",
+  "scripts": { "start": "node bot.js" },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "firebase-admin": "^13.0.2"
+  }
+}

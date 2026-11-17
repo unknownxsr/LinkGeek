@@ -13,6 +13,7 @@
     <div class="brand">
       <img src="../assets/icon.png" alt="" />
       <span>Linkgeek</span>
+      <div class="tb-actions">
       <div class="notif-wrap">
         <button class="notif-bell" id="notif-bell" title="Notifications" aria-label="Notifications"><svg class="bell-ic" viewBox="0 0 24 24"><path d="M12 2.6a1.4 1.4 0 0 1 1.4 1.4v.5a6.4 6.4 0 0 1 5 6.3v3.6l1.7 2.6a1 1 0 0 1-.8 1.6H4.7a1 1 0 0 1-.8-1.6l1.7-2.6v-3.6a6.4 6.4 0 0 1 5-6.3V4A1.4 1.4 0 0 1 12 2.6z"/><path d="M9.6 19.8h4.8a2.4 2.4 0 0 1-4.8 0z"/></svg><span class="notif-count" id="notif-count"></span></button>
         <div class="notif-panel" id="notif-panel" hidden></div>
@@ -20,11 +21,14 @@
       <!-- Messagerie entre amis (renderer/chat-ui.js) -->
       <button class="notif-bell chat-btn" id="chat-btn" title="Messages" aria-label="Messages"><svg class="bell-ic" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.2 3.6c-.5.4-1.3 0-1.3-.6V16A2.5 2.5 0 0 1 4 13.5z"/></svg><span class="notif-count" id="chat-count"></span></button>
       <!-- Mode TV / manette (renderer/tv.js) -->
-      <button class="notif-bell tv-btn-top" id="tv-btn" data-tv-enter title="Mode TV / manette" aria-label="Mode TV / manette"><svg class="bell-ic" viewBox="0 0 24 24"><path d="M4.5 5h15A2.5 2.5 0 0 1 22 7.5v8a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 15.5v-8A2.5 2.5 0 0 1 4.5 5z"/><path d="M8 21h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg></button>
+      <button class="notif-bell tv-btn-top" id="tv-btn" title="Mode TV / manette" aria-label="Mode TV / manette"><svg class="bell-ic" viewBox="0 0 24 24"><path d="M4.5 4h15A2.5 2.5 0 0 1 22 6.5v8a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 14.5v-8A2.5 2.5 0 0 1 4.5 4z"/><path d="M8 20.5h8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></button>
       <!-- « Partager »: download link + parrainage (renderer/social-ui.js) -->
       <button class="notif-bell share-btn" id="share-btn" title="Partager Linkgeek" aria-label="Partager Linkgeek"><svg class="bell-ic" viewBox="0 0 24 24"><path d="M18 2.5a3.2 3.2 0 1 1-2.3 5.4l-6.4 3.4a3.3 3.3 0 0 1 0 1.4l6.4 3.4A3.2 3.2 0 1 1 14.8 18.5l-6.5-3.4a3.2 3.2 0 1 1 0-6.2l6.5-3.4A3.2 3.2 0 0 1 18 2.5z"/></svg></button>
+      <!-- Serveur Discord de Linkgeek (opened in the browser / Discord app by setWindowOpenHandler) -->
+      <a class="notif-bell discord-btn" id="discord-btn" href="https://discord.gg/brQ5WKAyNe" target="_blank" rel="noopener" title="Rejoindre le serveur Discord" aria-label="Rejoindre le serveur Discord"><svg class="bell-ic" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M19.3 5.3A16.6 16.6 0 0 0 15.2 4l-.5 1a15.4 15.4 0 0 0-5.4 0L8.8 4a16.6 16.6 0 0 0-4.1 1.3C2.1 9.2 1.4 13 1.8 16.7a16.7 16.7 0 0 0 5 2.5l1-1.6a10.8 10.8 0 0 1-1.6-.8l.4-.3a11.9 11.9 0 0 0 10.8 0l.4.3c-.5.3-1 .6-1.6.8l1 1.6a16.6 16.6 0 0 0 5-2.5c.5-4.3-.8-8.1-2.9-11.4zM8.7 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg></a>
       <!-- « Ne pas déranger » switch: sun (normal) on the left, moon (do not disturb) on the right -->
       <button class="dnd-switch dnd-moon" id="dnd-moon" role="switch" title="Ne pas déranger" aria-label="Ne pas déranger" aria-pressed="false" aria-checked="false"><span class="dnd-knob"></span><svg class="dnd-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="dnd-moon-ic" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
+      </div>
       <button class="update-pill" id="update-pill" hidden></button>
     </div>
     <div class="search">
@@ -63,6 +67,9 @@
   <div id="modal-root"></div>
   <div id="toasts"></div>
   <script src="i18n.js"></script>
+  <script src="i18n-es.js"></script>
+  <script src="i18n-de.js"></script>
+  <script src="i18n-ru.js"></script>
   <script src="social-ui.js"></script>
   <script src="app.js"></script>
   <script src="chat-ui.js"></script>

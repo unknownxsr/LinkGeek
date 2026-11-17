@@ -213,7 +213,7 @@ function tvLegend() {
   </div>`;
 }
 function tvClock() {
-  return new Date().toLocaleTimeString(state.settings && state.settings.language === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' });
+  return new Date().toLocaleTimeString(typeof linkgeekLocale === 'function' ? linkgeekLocale() : 'fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 function tvRender() {
   if (!TV.on) return;
@@ -232,6 +232,7 @@ function tvRender() {
         ${state.shop ? `<span class="tv-coins">${COIN}${fmtCoins(state.shop.coins)}</span>` : ''}
         <span class="tv-clock">${tvClock()}</span>
         ${avatarHtml('avatar')}<b>${esc(p && p.name ? p.name : 'Joueur')}</b>
+        <button class="tv-desk" data-tv-exit data-tv-key="t:desk" title="Revenir au mode bureau" aria-label="Revenir au mode bureau"><svg viewBox="0 0 24 24"><path d="M4.5 4h15A2.5 2.5 0 0 1 22 6.5v8a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 14.5v-8A2.5 2.5 0 0 1 4.5 4z"/><path d="M8 20.5h8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></button>
       </div>
     </header>
     <main class="tv-main ${!g && TV.tab === 'home' ? 'home' : ''}">${content}</main>
@@ -365,6 +366,7 @@ function tvFocusedGame() {
 }
 
 document.addEventListener('click', async (e) => {
+  if (e.target.closest('#tv-btn')) { if (TV.on) tvExit(); else tvEnter(); return; }
   if (e.target.closest('[data-tv-enter]')) { tvEnter(); return; }
   if (!TV.on || !e.target.closest('#tv-root')) return;
   const t = e.target.closest('[data-tv-tab],[data-tv-game],[data-tv-filter],[data-tv-friend],[data-tv-play],[data-tv-fav],[data-tv-back],[data-tv-close],[data-tv-exit],[data-tv-rescan],[data-tv-pick],[data-tv-invite-game],[data-tv-send-invite]');

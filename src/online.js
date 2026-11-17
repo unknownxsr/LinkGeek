@@ -324,7 +324,7 @@ class Online {
     for (const g of grants) paths.push(`grants/${me}/${g}`);
     if (code) paths.push(`codes/${code}`);
     for (const w of (this.getWeeklyWeeks ? this.getWeeklyWeeks() : [])) paths.push(`weekly/${w}/${me}`);
-    paths.push(`avatars/${me}`);
+    paths.push(`avatars/${me}`, `discord/${me}`, `discordLinks/${me}`);
     if (this.getExtraDeletePaths) paths.push(...this.getExtraDeletePaths()); // coéquipier, invites, duels index…
     paths.push(`users/${me}`);
     let failed = 0;
@@ -443,6 +443,7 @@ class Online {
     }
     const id = this.getIdentity();
     const entry = { name: String(id.name || 'Joueur').slice(0, 40), hours: Math.max(0, Math.min(168, w.hours)), level: id.level || 1 };
+    if (/^[A-Z]{2}$/.test(w.country || '')) entry.country = w.country; // country leaderboard
     if (id.photo && /^https:\/\//.test(id.photo)) entry.photo = id.photo;
     if (id.frame) entry.frame = id.frame;
     if (id.title) entry.title = id.title;
@@ -452,16 +453,33 @@ class Online {
       await this.db('PUT', path, { ...entry, at: SV_TIME });
       this.lastWeekly = key;
       if (this.onWeeklyPublished) this.onWeeklyPublished(w.week);
-    } catch { /* rules not republished yet */ }
+    } catch {
+      // rules not republished yet (no "country"): publish without it
+      if (!entry.country) return;
+      const { country, ...rest } = entry;
+      try { await this.db('PUT', path, { ...rest, at: SV_TIME }); this.lastWeekly = key; if (this.onWeeklyPublished) this.onWeeklyPublished(w.week); } catch { /* ignore */ }
+    }
   }
 
-  /** Top players of a week (hours played Monday → Sunday) and my own rank. */
-  async weeklyTop(week, myHours, n = 10) {
+  /**
+   * Top players of a week (hours played Monday → Sunday) and my own rank.
+   * With a country: only the players of that country (all of them are read, then sorted here).
+   */
+  async weeklyTop(week, myHours, n = 10, country = null) {
     if (!this.session) return null;
     const me = this.session.uid;
+    if (country) {
+      const all = (await this.db('GET', `weekly/${week}`, undefined, { orderBy: '"country"', equalTo: `"${country}"` })) || {};
+      const list = Object.entries(all).filter(([, e]) => e && e.hours > 0 && e.country === country)
+        .map(([uid, e]) => this.weeklyRow(uid, e))
+        .sort((a, b) => b.hours - a.hours || String(a.name).localeCompare(String(b.name), 'fr'));
+      const i = list.findIndex((r) => r.me);
+      const myRank = i >= 0 ? i + 1 : myHours > 0 ? list.filter((r) => r.hours > myHours).length + 1 : null;
+      return { rows: list.slice(0, n).concat(i >= n ? [list[i]] : []), myRank, total: list.length };
+    }
     const top = (await this.db('GET', `weekly/${week}`, undefined, { orderBy: '"hours"', limitToLast: n })) || {};
     const rows = Object.entries(top).filter(([, e]) => e && e.hours > 0)
-      .map(([uid, e]) => ({ me: uid === me, friend: (this.friendIds || []).includes(uid), uid: uid === me ? 'me' : uid, name: e.name, photo: ((this.friendIds || []).includes(uid) && this.avatarCache && this.avatarCache[uid] ? this.avatarCache[uid].data : e.photo) || null, frame: e.frame || null, title: e.title || null, level: e.level || 1, hours: e.hours }))
+      .map(([uid, e]) => this.weeklyRow(uid, e))
       .sort((a, b) => b.hours - a.hours || String(a.name).localeCompare(String(b.name), 'fr'));
     let myRank = rows.findIndex((r) => r.me) + 1 || null;
     if (!myRank && myHours > 0) {
@@ -469,6 +487,45 @@ class Online {
       myRank = Object.entries(above).filter(([uid, e]) => uid !== me && e && e.hours > myHours).length + 1;
     }
     return { rows, myRank };
+  }
+  /**
+   * Discord account link (rank roles on the Linkgeek Discord server):
+   *   discordLinks/{uid} = { code, at }   a 6-character code, valid 15 min, typed with /lier on Discord
+   *   discord/{uid}      = { id, name, at } written by the bot once the code is used
+   */
+  async discordLinkStatus() {
+    if (!this.session) return { signedIn: false };
+    const uid = this.session.uid;
+    const [link, pending] = await Promise.all([
+      this.db('GET', `discord/${uid}`).catch(() => null),
+      this.db('GET', `discordLinks/${uid}`).catch(() => null),
+    ]);
+    const fresh = pending && pending.code && this.now() - (Number(pending.at) || 0) < 15 * 60000;
+    return {
+      signedIn: true,
+      linked: link && link.id ? { name: String(link.name || '').slice(0, 40), at: Number(link.at) || null } : null,
+      code: !link && fresh ? pending.code : null,
+      expiresAt: fresh ? Number(pending.at) + 15 * 60000 : null,
+    };
+  }
+  async discordLinkStart() {
+    if (!this.session) throw new Error('Connecte-toi au mode en ligne pour lier ton compte Discord');
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
+    const code = Array.from(require('crypto').randomBytes(6), (b) => A[b % A.length]).join('');
+    await this.db('PUT', `discordLinks/${this.session.uid}`, { code, at: SV_TIME });
+    return this.discordLinkStatus();
+  }
+  async discordUnlink() {
+    if (!this.session) return { signedIn: false };
+    const uid = this.session.uid;
+    await this.db('PATCH', '', { [`discord/${uid}`]: null, [`discordLinks/${uid}`]: null });
+    return this.discordLinkStatus();
+  }
+
+  weeklyRow(uid, e) {
+    const me = this.session.uid;
+    const friend = (this.friendIds || []).includes(uid);
+    return { me: uid === me, friend, uid: uid === me ? 'me' : uid, name: e.name, photo: (friend && this.avatarCache && this.avatarCache[uid] ? this.avatarCache[uid].data : e.photo) || null, frame: e.frame || null, title: e.title || null, level: e.level || 1, hours: e.hours, country: /^[A-Z]{2}$/.test(e.country || '') ? e.country : null };
   }
 
   /**

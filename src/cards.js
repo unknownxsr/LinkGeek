@@ -11,6 +11,8 @@
  * - Every card exists in 3 versions: sans skin (plain weapon), avec skin, holo (with its skin).
  *   Whatever the card, SKIN_PCT % chance to get it with its skin, and 1 skin in 4 is holo:
  *   sans skin 90 % · avec skin 7,5 % · holo 2,5 %.
+ * - Carte du jour (dailyCard()): one epic / legendary / mythic card a day (80 / 17 / 3 %), the same
+ *   for every player, with an extra chance per card drawn: +5 % epic, +2,5 % legendary, +1,5 % mythic.
  * - Duplicates are counted (×2, ×3…), per version, and can be fused (fuse()): 15 common doubles
  *   → 1 random rare, 20 rare doubles → 1 random epic. Nothing for legendary or mythic.
  * - The admin can give/remove cards and offer boosters (store.data.cards.gifts): an offered
@@ -38,6 +40,17 @@ const RARITIES = {
   epic: { name: 'Épique', pct: 7, order: 2 },
   legendary: { name: 'Légendaire', pct: 2.5, order: 3 },
   mythic: { name: 'Mythique', pct: 0.5, order: 4 },
+};
+
+/**
+ * Carte du jour: each day one epic, legendary or mythic card gets a better drop rate.
+ * Its rarity is drawn with ODDS (epic 80 / legendary 17 / mythic 3 %), then a card of that rarity.
+ * The pick comes from a hash of the date, so every player has the same card the same day.
+ * BOOST = extra chance, for each card drawn in a booster, to get the card of the day.
+ */
+const DAILY_CARD = {
+  odds: { epic: 80, legendary: 17, mythic: 3 },
+  boost: { epic: 5, legendary: 2.5, mythic: 1.5 },
 };
 
 // fusion of the doubles: 15 commons → 1 rare, 20 rares → 1 epic (nothing above)
@@ -127,16 +140,35 @@ class Cards {
     this.store.save();
   }
 
-  /** One card: rarity by its odds, then a card of that rarity; then its version (skin 10 %, holo 2,5 %). */
-  draw() {
-    let r = crypto.randomInt(1000);
-    let rarity = 'common';
-    for (const [k, v] of Object.entries(RARITIES)) { const w = Math.round(v.pct * 10); if (r < w) { rarity = k; break; } r -= w; }
+  /** The card of the day (same for everyone on a given date): { card, boost, day }. */
+  dailyCard(now = Date.now()) {
+    const day = dayKey(now);
+    const h = crypto.createHash('sha256').update(`linkgeek-carte-du-jour:${day}`).digest();
+    let r = h.readUInt32BE(0) % 1000;
+    let rarity = 'epic';
+    for (const [k, pct] of Object.entries(DAILY_CARD.odds)) { const w = Math.round(pct * 10); if (r < w) { rarity = k; break; } r -= w; }
     const pool = CARDS.filter((c) => c.rarity === rarity);
-    const card = pool[crypto.randomInt(pool.length)];
+    return { card: pool[h.readUInt32BE(4) % pool.length], boost: DAILY_CARD.boost[rarity], day };
+  }
+
+  /**
+   * One card: first the card of the day's extra chance (DAILY_CARD.boost %), otherwise rarity by
+   * its odds, then a card of that rarity; then its version (skin 10 %, holo 2,5 %).
+   */
+  draw() {
+    const daily = this.dailyCard();
+    let card;
+    if (crypto.randomInt(1000) < Math.round(daily.boost * 10)) card = daily.card;
+    else {
+      let r = crypto.randomInt(1000);
+      let rarity = 'common';
+      for (const [k, v] of Object.entries(RARITIES)) { const w = Math.round(v.pct * 10); if (r < w) { rarity = k; break; } r -= w; }
+      const pool = CARDS.filter((c) => c.rarity === rarity);
+      card = pool[crypto.randomInt(pool.length)];
+    }
     const v = crypto.randomInt(1000);
     const holo = v < HOLO_PCT * 10;
-    return { id: card.id, holo, skin: holo || v < SKIN_PCT * 10 };
+    return { id: card.id, holo, skin: holo || v < SKIN_PCT * 10, daily: card.id === daily.card.id };
   }
 
   /** Boosters opened today (a clock set back keeps the count, like the wheel). */
@@ -296,7 +328,10 @@ class Cards {
     const got = cards.filter((x) => x.n > 0);
     const next = new Date(); next.setHours(24, 0, 0, 0);
     const today = this.today();
+    const dc = this.dailyCard();
     return {
+      // carte du jour: its id, its extra chance per card drawn, when it changes, how it is picked
+      dailyCard: { id: dc.card.id, rarity: dc.card.rarity, boost: dc.boost, endsAt: next.getTime(), odds: DAILY_CARD.odds, boosts: DAILY_CARD.boost },
       gifts: this.gifts,
       dailyLimit: DAILY_LIMIT,
       openedToday: today,

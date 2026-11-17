@@ -231,6 +231,7 @@ class Online {
     await this.heartbeat(true);
     await this.poll();
     this.openOwnStreams();
+    if (this.onStarted) this.onStarted(); // invites, duels, coéquipiers (src/social.js)
     this.timers.push(setInterval(() => this.heartbeat().catch(() => {}), HEARTBEAT_MS));
     this.timers.push(setInterval(() => {
       // full refresh: often without live streams, rarely with them
@@ -240,6 +241,7 @@ class Online {
   }
 
   stopTimers() {
+    if (this.onStopped) this.onStopped();
     this.timers.forEach(clearInterval); this.timers = [];
     clearTimeout(this.levelTimer);
     for (const s of this.streams.values()) s.close();
@@ -323,6 +325,7 @@ class Online {
     if (code) paths.push(`codes/${code}`);
     for (const w of (this.getWeeklyWeeks ? this.getWeeklyWeeks() : [])) paths.push(`weekly/${w}/${me}`);
     paths.push(`avatars/${me}`);
+    if (this.getExtraDeletePaths) paths.push(...this.getExtraDeletePaths()); // coéquipier, invites, duels index…
     paths.push(`users/${me}`);
     let failed = 0;
     for (const p of paths) await this.db('DELETE', p).catch(() => { failed++; });
@@ -561,7 +564,7 @@ class Online {
     }
     if (Number.isFinite(g.packs) && g.packs !== 0) body.packs = Math.max(-999, Math.min(999, Math.trunc(g.packs)));
     if (g.item && /^[a-z_]{2,30}$/.test(String(g.item))) { body.item = String(g.item); if (g.itemRemove) body.itemRemove = true; }
-    if (body.xp === undefined && body.level === undefined && body.coins === undefined && body.ach === undefined && body.card === undefined && body.packs === undefined && body.item === undefined) throw new Error('Indique de l\'XP, un niveau, des jetons, un succès, un article, des cartes ou des boosters');
+    if (body.xp === undefined && body.level === undefined && body.coins === undefined && body.ach === undefined && body.card === undefined && body.packs === undefined && body.item === undefined) throw new Error('Indique de l\'XP, un niveau, des Geek Coins, un succès, un article, des cartes ou des boosters');
     await this.db('POST', `grants/${uid}`, body);
     if (body.xp === undefined && body.level === undefined) return;
     // lets the player show their new level right away (see publishLevel)
@@ -724,12 +727,21 @@ class Online {
     if (code === this.code) throw new Error('C\'est ton propre code 🙂');
     const fid = await this.db('GET', `codes/${code}`);
     if (!fid) throw new Error('Aucun joueur avec ce code');
+    return this.sendRequestTo(fid);
+  }
+
+  /** Friend request to a known player (friend code, « Recherche un coéquipier », parrainage). */
+  async sendRequestTo(fid) {
+    if (!this.session) throw new Error('Connecte-toi d\'abord avec Google');
     const me = this.session.uid;
+    if (!fid || fid === me) throw new Error('Joueur inconnu');
     if (await this.db('GET', `friends/${me}/${fid}`)) throw new Error('Vous êtes déjà amis');
     // They already asked me: accept straight away
     if (await this.db('GET', `requests/${me}/${fid}`)) { await this.accept(fid); return 'accepted'; }
     const id = this.getIdentity();
-    await this.db('PUT', `requests/${fid}/${me}`, { name: id.name || 'Joueur', photo: id.photo || null, at: SV_TIME });
+    const body = { name: id.name || 'Joueur', at: SV_TIME };
+    if (id.photo && /^https:\/\//.test(id.photo)) body.photo = id.photo;
+    await this.db('PUT', `requests/${fid}/${me}`, body);
     if (this.onSentRequest) this.onSentRequest(fid); // so deleting the account can withdraw it
     return 'sent';
   }

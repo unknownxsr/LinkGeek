@@ -164,7 +164,10 @@ try {
   if ($LASTEXITCODE -ge 8) { throw "copie des fichiers impossible (robocopy $LASTEXITCODE)" }
   robocopy (Join-Path $src 'resources\\app') (Join-Path $dst 'resources\\app') /MIR /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "copie du code impossible (robocopy $LASTEXITCODE)" }
-  $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Linkgeek'
+  # icon of the shortcuts (root of the install folder, next to Linkgeek.exe), then refresh Windows' icon cache
+  $ico = Join-Path (Split-Path $src -Parent) 'icon.ico'
+  if (Test-Path $ico) { Copy-Item $ico (Join-Path $dst 'icon.ico') -Force; try { Start-Process -FilePath "$env:SystemRoot\\System32\\ie4uinit.exe" -ArgumentList '-show' -WindowStyle Hidden -Wait } catch { } }
+  $key ='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Linkgeek'
   if ((Test-Path $key) -and ((Get-ItemProperty $key).InstallLocation -eq $dst)) { Set-ItemProperty $key -Name DisplayVersion -Value $ver }
   @{ ok = $true; version = $ver } | ConvertTo-Json | Set-Content -Path $result -Encoding UTF8
 } catch {

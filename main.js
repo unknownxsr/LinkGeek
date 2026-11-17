@@ -20,6 +20,9 @@ const { Genres, GENRES } = require('./src/genres');
 const { Titles } = require('./src/titles');
 const { News } = require('./src/news');
 const { Recommender } = require('./src/recommend');
+const { Notifier } = require('./src/notifier');
+const { Social, gameKey } = require('./src/social');
+const { Chat } = require('./src/chat');
 
 const FREE_THEMES = ['classic', 'dark', 'light'];
 const THEMES = {
@@ -56,7 +59,109 @@ let news;
 let reco;
 const discord = new DiscordPresence();
 let lastFriendGames = null; // uid -> game id, to notify when a friend starts a game
+let lastFriendOnline = null; // uid -> online?, to notify when a friend comes online
+let notifier = null; // overlay notifications (top-right, on top of games)
+let social = null;   // invites, duels, coéquipiers, contact, parrainage
+let chat = null;     // messagerie entre amis
+let chatFriendsT = null;
+// Public download page (button « Partager » in the top bar)
+const DOWNLOAD_URL = 'https://github.com/unknownxsr/linkgeek/releases/latest';
 let quitting = false;
+
+/* ---------------- Notifications (Paramètres → Notifications) ----------------
+ * Each type can be switched off. When Linkgeek is not the window in front (a game is,
+ * or it is minimised / in the tray), they show at the top-right of the screen, on top of
+ * the game. When Linkgeek is in front, the app shows its own toast instead. */
+const NOTIF_TYPES = ['trophy', 'friendOnline', 'friendGame', 'invite', 'message', 'duel', 'challenge', 'level', 'wheel', 'packs', 'update'];
+const L = (fr, en) => (store && store.data.settings.language === 'en' ? en : fr);
+function notifOn(type) {
+  const s = store.data.settings;
+  if (type === 'friendGame') return s.notifyFriends !== false; // older setting, same switch
+  return !(s.notifs && s.notifs[type] === false);
+}
+/**
+ * n = { kicker, title, body, icon (emoji), img (url), round, accent ('r,g,b') }.
+ * inApp: Linkgeek in front → ask the window for a toast (types the app has no toast for).
+ */
+function notify(type, n, inApp = false) {
+  if (!store || !notifOn(type)) return;
+  if ((type === 'friendOnline' || type === 'friendGame' || type === 'invite' || type === 'message') && dndActive()) return; // « Ne pas déranger »
+  const front = win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused();
+  if (front) { if (inApp) send('notify:inapp', { type, ...n }); return; }
+  if (!notifier) notifier = new Notifier();
+  notifier.show({ type, ...n });
+}
+const TIER_ACCENT = { bronze: '205,127,50', silver: '200,210,222', gold: '242,185,44', platinum: '159,216,255' };
+const localDay = (t = Date.now()) => { const d = new Date(t); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+/** Once a day: the wheel can be spun / boosters can be opened (also right after midnight). */
+function checkDailyNotifs() {
+  if (!store || !shop || !cards || !challenges) return;
+  const seen = store.data.notifSeen || (store.data.notifSeen = {});
+  const today = localDay();
+  try {
+    if (shop.wheel().free && seen.wheel !== today) {
+      seen.wheel = today; store.save();
+      notify('wheel', { kicker: L('Roulette du jour', 'Daily wheel'), title: L('Ton tour gratuit t\'attend', 'Your free spin is waiting'), body: L('Geek Coins, XP ou un thème au hasard : tente ta chance dans la Boutique.', 'Geek Coins, XP or a random theme: try your luck in the Shop.'), icon: '🎡', accent: '242,185,44' }, true);
+    }
+    const c = cards.list();
+    if (c.leftToday > 0 && (c.gifts > 0 || c.coins >= c.price) && seen.packs !== today) {
+      seen.packs = today; store.save();
+      notify('packs', { kicker: L('Cartes à collectionner', 'Collectible cards'), title: c.gifts > 0 ? L(`${c.gifts} booster${c.gifts > 1 ? 's' : ''} offert${c.gifts > 1 ? 's' : ''} à ouvrir`, `${c.gifts} gifted booster${c.gifts > 1 ? 's' : ''} to open`) : L(`${c.leftToday} boosters à ouvrir aujourd'hui`, `${c.leftToday} boosters to open today`), body: L('Ouvre-les dans Succès → Cartes.', 'Open them in Achievements → Cards.'), icon: '🃏', accent: '181,107,255' }, true);
+    }
+  } catch { /* not ready */ }
+}
+
+/**
+ * My score in a duel for its week [start, end): minutes played (Linkgeek tracking) on the
+ * duel's game, matched by name so it works whatever the store, or challenges completed.
+ */
+function duelScore(d, start, end) {
+  if (d.kind === 'challenges') {
+    const h = (challenges && challenges.data && challenges.data.history) || [];
+    return h.filter((x) => x.at >= start && x.at < end && ['daily', 'weekly', 'onetime'].includes(x.kind)).length;
+  }
+  const key = d.game && d.game.key;
+  if (!key || !library) return 0;
+  const ids = new Set(library.games().filter((g) => gameKey(g.name) === key).map((g) => g.id));
+  if (!ids.size) return 0;
+  const sessions = [...store.data.sessions];
+  if (tracker) for (const [gameId, r] of tracker.running) sessions.push({ gameId, start: r.start, end: Date.now() });
+  let ms = 0;
+  for (const s of sessions) if (ids.has(s.gameId)) ms += Math.max(0, Math.min(s.end, end) - Math.max(s.start, start));
+  return Math.floor(ms / 60000);
+}
+
+/** A new message from a friend (src/chat.js): the window reloads the conversation, else a notification. */
+function chatEvent(kind, e) {
+  if (kind !== 'message') return;
+  send('chat:message', e);
+  if (e.quiet) return;
+  const front = win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused();
+  if (front && e.open) return; // already reading this conversation
+  notify('message', { kicker: L('Nouveau message', 'New message'), title: e.name, body: e.text, img: e.photo || '', icon: '💬', round: true, accent: '79,179,255', duration: 7000 }, true);
+}
+
+/** News from src/social.js → window + notifications (top-right when Linkgeek is not in front). */
+function socialEvent(kind, e) {
+  if (kind === 'invite') {
+    send('social:invite', e);
+    notify('invite', { kicker: L('Invitation à jouer', 'Game invite'), title: L(`${e.name} t'invite à jouer`, `${e.name} invites you to play`), body: e.game.name, img: e.photo || '', icon: '🎮', round: true, accent: '79,179,255', duration: 9000 });
+  } else if (kind === 'duelNew') {
+    const d = e.duel;
+    notify('duel', { kicker: L('Duel de la semaine', 'Weekly duel'), title: L(`${d.aName} te défie !`, `${d.aName} challenges you!`), body: `${d.kind === 'game' ? L(`Qui joue le plus à ${d.game.name} ?`, `Who plays ${d.game.name} the most?`) : L('Qui fait le plus de défis ?', 'Who completes the most challenges?')} · ${d.stake} Geek Coins`, icon: '⚔️', accent: '255,92,120' }, true);
+  } else if (kind === 'duelAnswer') {
+    const d = e.duel;
+    if (d.a !== e.me) return;
+    const ok = d.status === 'active';
+    notify('duel', { kicker: L('Duel de la semaine', 'Weekly duel'), title: ok ? L(`${d.bName} accepte ton duel !`, `${d.bName} accepts your duel!`) : L(`${d.bName} refuse ton duel`, `${d.bName} declines your duel`), body: ok ? L('Que le meilleur gagne 🔥', 'May the best one win 🔥') : L('Ta mise t\'est rendue.', 'Your stake is given back.'), icon: '⚔️', accent: '255,92,120' }, true);
+  } else if (kind === 'duelEnd') {
+    const won = e.result === 'won'; const draw = e.result === 'draw';
+    notify('duel', { kicker: L('Duel terminé', 'Duel over'), title: won ? L(`Tu gagnes ${e.stake * 2} Geek Coins !`, `You win ${e.stake * 2} Geek Coins!`) : draw ? L('Égalité : mise rendue', 'Draw: stake given back') : L('Duel perdu', 'Duel lost'), body: `${e.mine} – ${e.theirs}`, icon: won ? '🏆' : draw ? '🤝' : '⚔️', accent: won ? '242,185,44' : '255,92,120' }, true);
+  } else if (kind === 'referralPack') {
+    send('cards:gift', { what: '+1 booster', by: L('Parrainage', 'Referral'), packs: 1 });
+    notify('packs', { kicker: L('Parrainage', 'Referral'), title: L('Booster offert !', 'Free booster!'), body: e.why === 'referred' ? L('Merci d\'avoir rejoint Linkgeek grâce à un ami.', 'Thanks for joining Linkgeek through a friend.') : L('Un ami que tu as invité a installé Linkgeek.', 'A friend you invited installed Linkgeek.'), icon: '🃏', accent: '181,107,255' });
+  }
+}
 let offlineSent = false;
 
 const IMG_EXT = /\.(png|jpe?g|webp|gif|bmp|ico)$/i;
@@ -84,14 +189,8 @@ function titleContext() {
 function announceTitles(list) {
   send('titles:unlocked', list);
   if (online) online.updateIdentity();
-  if (win && !win.isDestroyed() && win.isVisible()) return;
-  try {
-    const { Notification } = require('electron');
-    if (!Notification.isSupported()) return;
-    const n = new Notification({ title: `Nouveau titre débloqué : ${list[0].name}`, body: list[0].desc, icon: path.join(__dirname, 'assets', 'icon.png') });
-    n.on('click', () => { if (win) { win.show(); win.focus(); send('shop:open'); } });
-    n.show();
-  } catch { /* ignore */ }
+  // a profile title counts as a trophy notification (on top of the game when Linkgeek is not in front)
+  if (list[0]) notify('trophy', { kicker: L('Nouveau titre débloqué', 'New title unlocked'), title: list[0].name, body: list[0].desc, icon: '🏷️', accent: '242,185,44' });
 }
 
 function announceChallenges(r) {
@@ -100,22 +199,26 @@ function announceChallenges(r) {
   send('challenges:completed', r);
   if (r.levelUp && r.levelUp.rankUp && online) online.updateIdentity(); // new rank = new avatar frame
   if (r.levelUp && online) online.updateIdentity(); // friends see the new level
-  if (win && !win.isDestroyed() && win.isVisible()) return;
-  try {
-    const { Notification } = require('electron');
-    if (!Notification.isSupported()) return;
-    const xp = r.completed.reduce((a, c) => a + c.xp, 0);
-    const sx = (n) => `${n >= 0 ? '+' : '−'}${Math.abs(n)} XP`;
-    if (!r.levelUp && r.completed.every((c) => c.kind === 'wheel')) return; // shown by the wheel itself
-    const admin = r.completed.some((c) => c.kind === 'admin');
-    const n = new Notification({
-      title: r.levelUp ? `Niveau ${r.levelUp.to} atteint !${r.levelUp.rankUp ? ` Badge ${r.levelUp.rankName} débloqué` : ''}` : admin ? `XP de l'administrateur : ${sx(xp)}` : `Défi terminé : ${sx(xp)}`,
-      body: r.completed.map((c) => `${c.title} (${sx(c.xp)})`).join('\n'),
-      icon: path.join(__dirname, 'assets', 'icon.png'),
+  // On top of the game when Linkgeek is not in front (the app shows its own toast otherwise)
+  const sx = (n) => `${n >= 0 ? '+' : '−'}${Math.abs(n)} XP`;
+  const done = r.completed.filter((c) => c.kind !== 'wheel' && c.kind !== 'admin'); // the wheel shows its own prize
+  if (done.length) {
+    const xp = done.reduce((a, c) => a + c.xp, 0);
+    notify('challenge', {
+      kicker: done.length > 1 ? L(`${done.length} défis réalisés`, `${done.length} challenges completed`) : L('Défi réalisé', 'Challenge completed'),
+      title: done.length > 1 ? `${sx(xp)}${r.tokens ? ` · +${r.tokens} Geek Coins` : ''}` : done[0].title,
+      body: done.length > 1 ? done.map((c) => c.title).join(' · ') : `${sx(done[0].xp)}${r.tokens ? ` · +${r.tokens} Geek Coins` : ''}`,
+      icon: '✅', accent: '61,214,140',
     });
-    n.on('click', () => { if (win) { win.show(); win.focus(); send('challenges:open'); } });
-    n.show();
-  } catch { /* ignore */ }
+  }
+  if (r.levelUp) {
+    notify('level', {
+      kicker: L('Niveau supérieur', 'Level up'),
+      title: L(`Niveau ${r.levelUp.to} atteint !`, `Level ${r.levelUp.to} reached!`),
+      body: r.levelUp.rankUp ? L(`Nouveau badge : ${r.levelUp.rankName}`, `New badge: ${r.levelUp.rankName}`) : L('Continue tes défis pour monter encore.', 'Keep completing challenges to climb higher.'),
+      icon: '⬆️', accent: '124,92,255',
+    });
+  }
 }
 
 /** Wheel XP waiting to be added (also picked up at the next start if Linkgeek closed meanwhile). */
@@ -138,20 +241,17 @@ function announceAchievements(list) {
   if (titles) titles.schedule(); // "Perfectionniste"
   send('achievements:unlocked', list);
   if (challenges) challenges.schedule();
-  // Window hidden in the tray: use a Windows notification instead of the in-app toast
-  if (win && !win.isDestroyed() && win.isVisible()) return;
-  try {
-    const { Notification } = require('electron');
-    if (!Notification.isSupported()) return;
-    const first = list[list.length - 1];
-    const n = new Notification({
-      title: list.length > 1 ? `${list.length} trophées débloqués !` : `Trophée ${first.tierName} débloqué !`,
-      body: `${first.name} — ${first.desc}`,
-      icon: path.join(__dirname, 'assets', 'icon.png'),
-    });
-    n.on('click', () => { if (win) { win.show(); win.focus(); send('achievements:open'); } });
-    n.show();
-  } catch { /* ignore */ }
+  // On top of the game (top-right) when Linkgeek is not in front; the app shows its own toast otherwise
+  const first = list[list.length - 1];
+  if (!first) return;
+  notify('trophy', {
+    kicker: list.length > 1 ? L(`${list.length} trophées débloqués`, `${list.length} trophies unlocked`) : L(`Trophée ${first.tierName} débloqué`, `${first.tierName} trophy unlocked`),
+    title: first.name,
+    body: first.desc,
+    icon: first.kind === 'ultimate' ? '👑' : first.secret ? '🔮' : '🏆',
+    accent: first.kind === 'ultimate' ? '255,140,220' : first.secret ? '140,100,255' : TIER_ACCENT[first.rarity] || TIER_ACCENT.bronze,
+    duration: 6500,
+  });
 }
 
 function createWindow() {
@@ -163,9 +263,10 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: theme.bg,
     title: 'Linkgeek',
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    // .ico on Windows: the window and taskbar pick the exact size they need (16 … 256)
+    icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: theme.symbol, height: 40 },
+    titleBarOverlay: { color: '#00000000', symbolColor: theme.symbol, height: 52 },
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -174,6 +275,19 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // Pinning the window to the taskbar: Windows would take the icon of Linkgeek.exe (Electron's,
+  // the exe is never modified). These properties give it the Linkgeek logo and how to relaunch.
+  if (process.platform === 'win32') {
+    try {
+      win.setAppDetails({
+        appId: 'com.zenshyy.linkgeek',
+        appIconPath: path.join(__dirname, 'assets', 'icon.ico'),
+        appIconIndex: 0,
+        relaunchCommand: `"${process.execPath}"`,
+        relaunchDisplayName: 'Linkgeek',
+      });
+    } catch { /* older Windows: keep the default */ }
+  }
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   // --hidden: started with Windows, stay in the tray and just track playtime
   if (!process.argv.includes('--hidden')) win.once('ready-to-show', () => win.show());
@@ -191,11 +305,14 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png')).resize({ width: 16, height: 16 });
+  const icon = process.platform === 'win32'
+    ? nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico')) // Windows takes the 16/24/32 px frame it needs
+    : nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png')).resize({ width: 16, height: 16 });
   tray = new Tray(icon);
   tray.setToolTip('Linkgeek');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Ouvrir Linkgeek', click: () => { win.show(); win.focus(); } },
+    { label: 'Mode TV / manette', click: () => { win.show(); win.focus(); send('tv:mode', true); } },
     { type: 'separator' },
     { label: 'Quitter', click: () => { quitting = true; app.quit(); } },
   ]));
@@ -272,13 +389,17 @@ function getProfile() {
   };
 }
 
-/** The 2 best collectible cards: rarest first, a holographic copy before a normal one. */
+/**
+ * The 2 best collectible cards: rarest first, then holo, then avec skin, then sans skin.
+ * Shared as { id, holo }: id + "skin" = the skinned version (ids stay a-z for the rules).
+ */
 function bestCards() {
   if (!cards) return [];
-  const RANK = { legendary: 3, epic: 2, rare: 1, common: 0 };
+  const RANK = { mythic: 4, legendary: 3, epic: 2, rare: 1, common: 0 };
+  const vr = (c) => (c.holo > 0 ? 2 : c.skinN > 0 ? 1 : 0);
   return cards.list().cards.filter((c) => c.n > 0)
-    .sort((a, b) => RANK[b.rarity] - RANK[a.rarity] || (b.holo > 0) - (a.holo > 0) || b.n - a.n || a.num - b.num)
-    .slice(0, 2).map((c) => ({ id: c.id, holo: c.holo > 0 }));
+    .sort((a, b) => RANK[b.rarity] - RANK[a.rarity] || vr(b) - vr(a) || b.n - a.n || a.num - b.num)
+    .slice(0, 2).map((c) => ({ id: vr(c) === 1 ? c.id + 'skin' : c.id, holo: c.holo > 0 }));
 }
 
 /** The 3 showcased achievements, resolved (a slot whose achievement is locked again shows empty). */
@@ -624,14 +745,20 @@ function applyItemGrant(id, remove) {
   return { item, themeReset };
 }
 
-/** Cards part of an admin gift:{ card: id | 'all', cardN (±), holo, packs (±) }, all checked. */
+/**
+ * Cards part of an admin gift: { card: id | 'all' (+ "skin" = avec skin), cardN (±), holo, packs (±) },
+ * all checked. Gives out.variant: 'base' (sans skin), 'skin' or 'holo'.
+ */
 function cardGrant(g) {
   const out = {};
   const n = Math.trunc(Number(g && g.cardN));
   if (g && g.card && Number.isFinite(n) && n !== 0) {
-    const id = String(g.card);
+    let id = String(g.card);
+    let skin = false;
+    if (id !== 'all' && !CARD_LIST.some((c) => c.id === id) && id.endsWith('skin')) { id = id.slice(0, -4); skin = true; }
     if (id !== 'all' && !CARD_LIST.some((c) => c.id === id)) throw new Error('Carte inconnue');
     out.card = id; out.cardN = Math.max(-999, Math.min(999, n)); out.holo = !!g.holo;
+    out.variant = out.holo ? 'holo' : skin ? 'skin' : 'base';
   }
   const p = Math.trunc(Number(g && g.packs));
   if (Number.isFinite(p) && p !== 0) out.packs = Math.max(-999, Math.min(999, p));
@@ -755,29 +882,47 @@ function dndActive() {
  * paused by the window) to leave memory and CPU to the game. Back to normal when it stops.
  */
 let gameModeOn = false;
+let tvMode = false; // mode TV / manette (full screen, renderer/tv.js)
+let tvHadGame = false;
 function updateGameMode(running) {
   const on = store.data.settings.gameMode !== false && running.length > 0;
   if (on && !gameModeOn && win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) win.minimize();
+  // mode TV: the game is closed → back to the big screen, like a console
+  // (only once, when the last game closes)
+  if (running.length === 0 && tvHadGame && tvMode && win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.setFullScreen(true); win.focus(); }
+  tvHadGame = running.length > 0;
   gameModeOn = on;
   send('gamemode', { on, dnd: dndActive() }); // also tells the window whether « Ne pas déranger » is on
 }
 
+/** A friend comes online / starts a game: in the app, or on top of the game (top-right). */
 function notifyFriendGames(snap) {
   const now = new Map(snap.friends.map((f) => [f.uid, f.game ? f.game.id : null]));
   const prev = lastFriendGames;
   lastFriendGames = now;
+  const onlineNow = new Map(snap.friends.map((f) => [f.uid, f.state !== 'offline']));
+  const prevOnline = lastFriendOnline;
+  lastFriendOnline = onlineNow;
+  const photo = (f) => (typeof f.photo === 'string' && /^(https:|data:image\/)/.test(f.photo) ? f.photo : '');
+  // friend online (not the first look after start: everybody would "come online")
+  if (prevOnline) {
+    for (const f of snap.friends) {
+      if (!onlineNow.get(f.uid) || !prevOnline.has(f.uid) || prevOnline.get(f.uid)) continue;
+      notify('friendOnline', {
+        kicker: L('Ami en ligne', 'Friend online'), title: L(`${f.name} est en ligne`, `${f.name} is online`),
+        body: f.game ? L(`Joue à ${f.game.name}`, `Playing ${f.game.name}`) : L('Viens jouer avec lui !', 'Come and play together!'),
+        img: photo(f), icon: '🟢', round: true, accent: '61,214,140',
+      }, true);
+    }
+  }
   if (!prev || store.data.settings.notifyFriends === false || dndActive()) return;
   for (const f of snap.friends) {
     if (!f.game || !prev.has(f.uid) || prev.get(f.uid) === f.game.id) continue;
     send('friends:activity', { uid: f.uid, name: f.name, photo: f.photo, game: f.game });
-    if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) continue;
-    try {
-      const { Notification } = require('electron');
-      if (!Notification.isSupported()) continue;
-      const n = new Notification({ title: `${f.name} joue maintenant`, body: `${f.name} vient de lancer ${f.game.name}`, icon: path.join(__dirname, 'assets', 'icon.png'), silent: true });
-      n.on('click', () => { if (win) { win.show(); win.focus(); send('friends:open'); } });
-      n.show();
-    } catch { /* ignore */ }
+    notify('friendGame', {
+      kicker: L('Un ami lance un jeu', 'A friend started a game'), title: L(`${f.name} joue maintenant`, `${f.name} is playing now`),
+      body: L(`Vient de lancer ${f.game.name}`, `Just started ${f.game.name}`), img: photo(f), icon: '🎮', round: true, accent: '79,179,255',
+    });
   }
 }
 
@@ -797,7 +942,10 @@ function getSettings() {
     account: store.data.account,
     admin: { isAdmin: isAdmin(), online: !!(online && online.session) },
     notifyFriends: s.notifyFriends !== false,
+    notifs: Object.fromEntries(NOTIF_TYPES.map((t) => [t, notifOn(t)])),
     gameMode: s.gameMode !== false,
+    tvStart: !!s.tvStart, // open in mode TV
+    tvPad: s.tvPad !== false, // a controller button (☰ / Start) opens mode TV
     homeLayout: s.homeLayout || null,
     dnd: DND_MODES.includes(s.dnd) ? s.dnd : 'competitive',
     dndGames: s.dndGames || [],
@@ -818,7 +966,7 @@ function applyTheme(theme) {
   const t = THEMES[theme] || THEMES.classic;
   if (win && !win.isDestroyed()) {
     win.setBackgroundColor(t.bg);
-    try { win.setTitleBarOverlay({ color: '#00000000', symbolColor: t.symbol, height: 40 }); } catch { /* ignore */ }
+    try { win.setTitleBarOverlay({ color: '#00000000', symbolColor: t.symbol, height: 52 }); } catch { /* ignore */ }
   }
 }
 
@@ -847,7 +995,8 @@ function registerIpc() {
   ipcMain.handle('library:rescan', async () => {
     await library.scan();
     library.computeSizes(() => send('library:changed'));
-    covers.fill(library.games(), () => send('library:changed'));
+    covers.fill(library.games(), () => send('library:changed'))
+      .finally(() => covers.fillDescriptions(library.games(), () => send('library:changed')));
     return snapshot();
   });
 
@@ -931,6 +1080,19 @@ function registerIpc() {
     const pulls = cards.open();
     return { pulls, gift, cards: cards.list(), shop: { ...shop.list(challenges.levelInfo().level), titles: titles.list() } };
   });
+  /* ---- Mode TV / manette: full screen, the renderer draws the big interface ---- */
+  ipcMain.handle('tv:set', (_e, on) => {
+    tvMode = !!on;
+    if (win && !win.isDestroyed()) {
+      if (tvMode) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+      win.setFullScreen(tvMode);
+    }
+    return tvMode;
+  });
+  ipcMain.handle('cards:fuse', (_e, rarity) => {
+    const pull = cards.fuse(String(rarity));
+    return { pull, cards: cards.list() };
+  });
   ipcMain.handle('shop:buyFrame', (_e, id, apply) => {
     const f = shop.buyFrame(String(id));
     const profile = apply ? setProfile({ frame: f.id }) : getProfile();
@@ -1002,7 +1164,14 @@ function registerIpc() {
     if (patch && typeof patch.closeToTray === 'boolean') s.closeToTray = patch.closeToTray;
     if (patch && typeof patch.startup === 'boolean') setStartup(patch.startup);
     if (patch && typeof patch.notifyFriends === 'boolean') s.notifyFriends = patch.notifyFriends;
+    if (patch && patch.notif && NOTIF_TYPES.includes(patch.notif.type) && typeof patch.notif.on === 'boolean') {
+      // one notification type on / off (Paramètres → Notifications)
+      if (patch.notif.type === 'friendGame') s.notifyFriends = patch.notif.on;
+      else s.notifs = { ...(s.notifs || {}), [patch.notif.type]: patch.notif.on };
+    }
     if (patch && typeof patch.gameMode === 'boolean') s.gameMode = patch.gameMode;
+    if (patch && typeof patch.tvStart === 'boolean') s.tvStart = patch.tvStart;
+    if (patch && typeof patch.tvPad === 'boolean') s.tvPad = patch.tvPad;
     if (patch && (Array.isArray(patch.homeLayout) || patch.homeLayout === null)) {
       // order + visibility of the home blocks: [{ id, hidden }]
       s.homeLayout = patch.homeLayout === null ? undefined : patch.homeLayout
@@ -1108,9 +1277,9 @@ function registerIpc() {
     const hasAch = !!(g && g.ach);
     const cg = cardGrant(g);
     const hasItem = !!(g && g.item);
-    if (!hasXp && !hasLevel && !hasCoins && !hasAch && !cg.card && !cg.packs && !hasItem) throw new Error('Indique de l\'XP, un niveau, des jetons, un succès, un article, des cartes ou des boosters');
+    if (!hasXp && !hasLevel && !hasCoins && !hasAch && !cg.card && !cg.packs && !hasItem) throw new Error('Indique de l\'XP, un niveau, des Geek Coins, un succès, un article, des cartes ou des boosters');
     const itemRes = hasItem ? applyItemGrant(g.item, g.itemRemove) : null;
-    if (cg.card) cards.giveCard(cg.card, cg.cardN, cg.holo);
+    if (cg.card) cards.giveCard(cg.card, cg.cardN, cg.variant);
     if (cg.packs) cards.addPacks(cg.packs);
     if (hasXp || hasLevel) {
       challenges.grant({
@@ -1119,7 +1288,7 @@ function registerIpc() {
         title: hasLevel ? `Niveau fixé à ${Math.floor(level)} (admin)` : `${xp > 0 ? 'XP ajoutée' : 'XP retirée'} (admin)`,
       });
     }
-    if (hasCoins) shop.add(Math.max(-1000000, Math.min(1000000, coins)), `${coins > 0 ? 'Jetons ajoutés' : 'Jetons retirés'} (admin)`);
+    if (hasCoins) shop.add(Math.max(-1000000, Math.min(1000000, coins)), `${coins > 0 ? 'Geek Coins ajoutés' : 'Geek Coins retirés'} (admin)`);
     const ach = hasAch ? grantAchOrTitle(String(g.ach), g.tier) : null;
     return { ...afterGrant(), shop: shop.list(challenges.levelInfo().level), ach, cards: cards.list(), themeReset: !!(itemRes && itemRes.themeReset), settings: getSettings() };
   });
@@ -1148,7 +1317,7 @@ function registerIpc() {
     await online.sendGrant(uid, {
       xp: Number(g.xp), level: g.level ? Number(g.level) : undefined, note: g.note,
       coins: Number(g.coins), ach: g.ach || undefined, tier: g.ach ? Number(g.tier) : undefined,
-      ...cardGrant(g),
+      ...((cg) => ({ ...cg, card: cg.card && cg.variant === 'skin' ? cg.card + 'skin' : cg.card }))(cardGrant(g)), // keeps the « avec skin » version
       item: g.item && shop.catalog().some((x) => x.id === g.item) ? g.item : undefined,
       itemRemove: g.item ? !!g.itemRemove : undefined,
     });
@@ -1249,6 +1418,54 @@ function registerIpc() {
   ipcMain.handle('friends:decline', (_e, uid) => online.decline(String(uid)));
   ipcMain.handle('friends:remove', (_e, uid) => online.remove(String(uid)));
   ipcMain.handle('friends:copyCode', () => { if (online.code) clipboard.writeText(online.code); return !!online.code; });
+
+  /* ---- Social: invites, duels, coéquipiers, contact, partage, parrainage (src/social.js) ---- */
+  ipcMain.handle('social:get', () => social.state());
+  ipcMain.handle('social:invite', (_e, fid, gameId) => {
+    const g = findGame(gameId);
+    if (!g) throw new Error('Jeu introuvable');
+    return social.invite(String(fid), { name: g.name });
+  });
+  ipcMain.handle('social:answerInvite', async (_e, from, accept) => {
+    const inv = social.invites.find((i) => i.from === from);
+    await social.answerInvite(String(from));
+    if (!accept || !inv) return { launched: false };
+    // the same game in my library (matched by name, whatever the store)
+    const g = library.games().find((x) => gameKey(x.name) === inv.game.key);
+    if (!g) return { launched: false, missing: inv.game.name };
+    await launchGame(g);
+    return { launched: true, name: g.name };
+  });
+  ipcMain.handle('social:createDuel', (_e, o) => {
+    const g = o && o.kind === 'game' ? findGame(o.gameId) : null;
+    if (o && o.kind === 'game' && !g) throw new Error('Choisis un jeu');
+    return social.createDuel({ fid: String(o.fid || ''), kind: o.kind, game: g ? { name: g.name } : null, stake: o.stake });
+  });
+  ipcMain.handle('social:answerDuel', (_e, id, accept) => social.answerDuel(String(id), !!accept));
+  ipcMain.handle('social:cancelDuel', (_e, id) => social.cancelDuel(String(id)));
+  ipcMain.handle('social:refresh', async () => { await Promise.all([social.pollDuels(), social.pollLfg(), social.pollInvites()]).catch(() => {}); return social.state(); });
+  ipcMain.handle('social:setLfg', (_e, on, o) => social.setLfg(!!on, o || {}).then(() => social.state()));
+  ipcMain.handle('social:askLfg', (_e, uid) => social.askLfg(String(uid)).then(() => social.state()));
+  ipcMain.handle('social:feedback', (_e, msg) => social.sendFeedback(msg));
+  ipcMain.handle('social:claimReferral', (_e, code) => social.claimReferral(code).then(() => social.state()));
+  ipcMain.handle('share:info', () => ({ url: DOWNLOAD_URL, code: online && online.code, signedIn: !!(online && online.session), ...social.state().referral }));
+  ipcMain.handle('share:copy', (_e, what) => {
+    const code = online && online.code;
+    const text = what === 'message'
+      ? L(`Rejoins-moi sur Linkgeek, le launcher qui regroupe tous tes jeux 🎮\nTélécharge-le ici : ${DOWNLOAD_URL}${code ? `\nPuis entre mon code ami ${code} dans Amis : on reçoit chacun un booster gratuit !` : ''}`,
+        `Join me on Linkgeek, the launcher that brings all your games together 🎮\nDownload it here: ${DOWNLOAD_URL}${code ? `\nThen enter my friend code ${code} in Friends: we both get a free booster!` : ''}`)
+      : DOWNLOAD_URL;
+    clipboard.writeText(text);
+    return true;
+  });
+  ipcMain.handle('share:open', () => shell.openExternal(DOWNLOAD_URL));
+  /* ---- Messagerie entre amis (src/chat.js) ---- */
+  ipcMain.handle('chat:get', () => chat.state());
+  ipcMain.handle('chat:open', (_e, fid) => chat.open(String(fid || '')));
+  ipcMain.handle('chat:close', () => { chat.close(); });
+  ipcMain.handle('chat:send', (_e, fid, text) => chat.send(String(fid || ''), String(text || '')));
+  ipcMain.handle('admin:feedback', () => { requireAdmin(); return social.listFeedback(); });
+  ipcMain.handle('admin:feedbackDelete', (_e, id) => { requireAdmin(); return social.deleteFeedback(String(id)); });
 
   ipcMain.handle('account:cancel', () => { google.cancel(); return true; });
 
@@ -1504,14 +1721,14 @@ app.whenReady().then(async () => {
       if (typeof g.ach === 'string' && g.ach) { try { grantAchOrTitle(g.ach, Number(g.tier)); } catch { /* unknown trophy */ } }
       try {
         const cg = cardGrant({ card: g.card, cardN: g.cardN, holo: g.holo, packs: g.packs });
-        if (cg.card) cards.giveCard(cg.card, cg.cardN, cg.holo);
+        if (cg.card) cards.giveCard(cg.card, cg.cardN, cg.variant);
         if (cg.packs) cards.addPacks(cg.packs);
         if (cg.card || cg.packs) {
           const what = [];
           if (cg.packs) what.push(`${cg.packs > 0 ? '+' : ''}${cg.packs} booster${Math.abs(cg.packs) > 1 ? 's' : ''}`);
           if (cg.card) {
             const name = cg.card === 'all' ? 'toutes les cartes' : `« ${CARD_LIST.find((c) => c.id === cg.card).name} »`;
-            what.push(`${cg.cardN > 0 ? '+' : ''}${cg.cardN} ${cg.holo ? 'holo ' : ''}× ${name}`);
+            what.push(`${cg.cardN > 0 ? '+' : ''}${cg.cardN} ${{ holo: 'holo ', skin: 'avec skin ', base: 'sans skin ' }[cg.variant] || ''}× ${name}`);
           }
           send('cards:gift', { what: what.join(' · '), by, packs: cg.packs || 0 });
         }
@@ -1526,6 +1743,7 @@ app.whenReady().then(async () => {
     },
     onUpdate: (snap) => {
       send('friends:changed', snap);
+      if (chat) { clearTimeout(chatFriendsT); chatFriendsT = setTimeout(() => chat.changed(), 300); } // names / statuses in the Messages list
       if (snap.status === 'online') {
         notifyFriendGames(snap);
         const myGame = currentActivity().game;
@@ -1536,6 +1754,27 @@ app.whenReady().then(async () => {
       }
     },
   });
+  // Invites, duels de la semaine, « Recherche un coéquipier », Contact, parrainage (src/social.js)
+  social = new Social({
+    online, store,
+    weekInfo: () => weekInfo(),
+    score: duelScore,
+    version: () => app.getVersion(),
+    coins: () => shop.data.coins,
+    addCoins: (n, why) => { shop.add(n, why); send('shop:coins', { n, why }); },
+    addPacks: (n) => { cards.addPacks(n); },
+    onEvent: socialEvent,
+    onChange: (st) => send('social:changed', st),
+  });
+  // Messagerie entre amis (src/chat.js)
+  chat = new Chat({
+    online, store,
+    onEvent: chatEvent,
+    onChange: (st) => send('chat:changed', st),
+  });
+  online.onStarted = () => { social.start(); chat.start(); };
+  online.onStopped = () => { social.stop(); chat.stop(); };
+  online.getExtraDeletePaths = () => [...social.deletePaths(), ...chat.deletePaths()];
   achievements = new Achievements(store, () => library.games(), () => online && online.snapshot, announceAchievements);
   achievements.getName = () => (library.profile && library.profile.name) || ''; // Steam name when no Linkgeek pseudo
   challenges = new Challenges({
@@ -1566,26 +1805,22 @@ app.whenReady().then(async () => {
 
   updater = setupUpdater({
     send,
-    notify: (version) => {
-      if (win && !win.isDestroyed() && win.isVisible()) return;
-      try {
-        const { Notification } = require('electron');
-        if (!Notification.isSupported()) return;
-        const n = new Notification({
-          title: `Linkgeek ${version} est prêt`,
-          body: 'La mise à jour sera installée à la prochaine fermeture de Linkgeek.',
-          icon: path.join(__dirname, 'assets', 'icon.png'),
-        });
-        n.on('click', () => { if (win) { win.show(); win.focus(); } });
-        n.show();
-      } catch { /* ignore */ }
-    },
+    notify: (version) => notify('update', {
+      kicker: L('Mise à jour du launcher', 'Launcher update'), title: L(`Linkgeek ${version} est prêt`, `Linkgeek ${version} is ready`),
+      body: L('Elle sera installée à la prochaine fermeture de Linkgeek.', 'It will be installed the next time Linkgeek closes.'), icon: '⬇️', accent: '34,211,238',
+    }),
     beforeInstall: async () => {
       quitting = true;
       if (tracker) tracker.stop();
       if (store) store.flush();
       if (online && online.session && !offlineSent) { offlineSent = true; await online.goOffline(); }
     },
+  });
+  // Paramètres → Notifications → « Tester »: shows one on top of everything, even with Linkgeek in front
+  ipcMain.handle('notify:test', () => {
+    if (!notifier) notifier = new Notifier();
+    notifier.show({ type: 'trophy', kicker: L('Trophée Or débloqué', 'Gold trophy unlocked'), title: L('Exemple de notification', 'Sample notification'), body: L('Elle s\'affiche ici, même par-dessus tes jeux.', 'It shows up here, even on top of your games.'), icon: '🏆', accent: TIER_ACCENT.gold });
+    return true;
   });
   ipcMain.handle('update:install', () => updater.install());
   ipcMain.handle('update:status', () => ({ version: app.getVersion(), ready: updater.ready || null, ...updater.status() }));
@@ -1595,6 +1830,9 @@ app.whenReady().then(async () => {
   achievements.ready = true;
   challenges.ready = true;
   titles.ready = true;
+  // wheel ready / boosters to open: once a day (at start, then right after midnight)
+  setTimeout(checkDailyNotifs, 12000);
+  setInterval(checkDailyNotifs, 60000);
   challenges.startClock();
   send('library:changed');
   tracker.start();
@@ -1602,6 +1840,7 @@ app.whenReady().then(async () => {
   library.computeSizes(() => send('library:changed'));
   // artwork first (it finds the Steam page of non-Steam games), then genres of the games played
   covers.fill(library.games(), () => send('library:changed'))
+    .finally(() => covers.fillDescriptions(library.games(), () => send('library:changed')))
     .finally(() => genres.fill(library.games().filter((g) => g.playtimeSec > 0), () => send('library:changed'))
       // recommendations need the tags of my games: computed once they are known (cached 12 h)
       .finally(() => { if (!reco.cached()) reco.compute().then((r) => { if (r) send('reco:changed'); }).catch(() => {}); }));
@@ -1616,6 +1855,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (e) => {
   quitting = true;
+  if (notifier) notifier.destroy();
   if (updater) updater.installOnQuit(); // a downloaded update is installed when Linkgeek closes
   if (tracker) tracker.stop();
   if (store) store.flush();

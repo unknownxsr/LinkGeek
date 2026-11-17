@@ -1,0 +1,19 @@
+/* Overlay notifications (top-right of the screen, on top of games) */
+html, body { margin: 0; background: transparent; overflow: hidden; font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; -webkit-font-smoothing: antialiased; user-select: none; }
+#stack { position: absolute; top: 0; right: 0; width: 100%; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; padding: 4px 4px 0 0; box-sizing: border-box; }
+.n { --ac: 124,92,255; position: relative; width: 352px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 12px; border-radius: 14px; overflow: hidden;
+  background: linear-gradient(100deg, rgba(var(--ac), .22), rgba(14,16,24,.0) 55%), rgba(14,16,24,.94); border: 1px solid rgba(var(--ac), .55);
+  box-shadow: 0 14px 34px rgba(0,0,0,.55), 0 0 22px -6px rgba(var(--ac), .7); color: #eef1f7;
+  animation: n-in .38s cubic-bezier(.2,1.2,.4,1) both; }
+.n.out { animation: n-out .35s ease-in forwards; }
+.n::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: rgba(var(--ac), .9); transform-origin: left; animation: n-timer var(--d, 5.5s) linear forwards; }
+.ic { flex-shrink: 0; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: rgba(var(--ac), .2); box-shadow: inset 0 0 0 1px rgba(var(--ac), .45); overflow: hidden; }
+.ic img { width: 100%; height: 100%; object-fit: cover; }
+.ic.round { border-radius: 50%; }
+.tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tx small { font-size: 10px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: rgb(var(--ac)); filter: brightness(1.35); }
+.tx b { font-size: 14px; font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx span { font-size: 12.5px; color: rgba(238,241,247,.72); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@keyframes n-in { from { opacity: 0; transform: translateX(60px) scale(.96); } }
+@keyframes n-out { to { opacity: 0; transform: translateX(60px); } }
+@keyframes n-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }

@@ -26,6 +26,19 @@ function pickImage(item, types, w, h) {
   return null;
 }
 
+/**
+ * Epic's local catalog cache sometimes stores accented letters as "?" ("r?uni", "c?ur",
+ * "D?couvrez"): the text is damaged at the source and cannot be repaired. Such a description
+ * is dropped and flagged (descBroken) so a clean one can be looked up elsewhere (covers.js).
+ */
+const BROKEN_TEXT = /[A-Za-z]\?+[A-Za-z]/; // "r?uni", "d??vasion"
+function description(item) {
+  const d = item && typeof item.description === 'string' && item.description !== item.title ? item.description.trim() : '';
+  if (!d) return { description: null };
+  if (BROKEN_TEXT.test(d)) return { description: null, descBroken: true };
+  return { description: d };
+}
+
 function scanEpic() {
   const dir = path.join(EPIC_DATA, 'Manifests');
   let files = [];
@@ -58,7 +71,7 @@ function scanEpic() {
       logo: pickImage(item, ['DieselGameBoxLogo'], 600),
       launch: { type: 'url', url: `com.epicgames.launcher://apps/${launchId}?action=launch&silent=true` },
       publisher: item && item.developer,
-      description: item && item.description !== item.title ? item.description : null,
+      ...description(item),
     });
   }
   return games;

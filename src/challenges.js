@@ -284,7 +284,7 @@ class Challenges {
       }
     }
     if (!fresh.length) return null;
-    p.history = p.history.slice(0, 40);
+    p.history = p.history.slice(0, 100); // long enough to count a week of challenges (duels)
     // Forget old daily/weekly completions (keep ~5 weeks)
     const cutoff = Date.now() - 35 * DAY;
     for (const [k, at] of Object.entries(p.completed)) if (!k.startsWith('o:') && at < cutoff) delete p.completed[k];
@@ -310,7 +310,7 @@ class Challenges {
     const title = String(g.title || (Number.isFinite(g.level) ? `Niveau fixé à ${Math.floor(g.level)} par l'administrateur` : 'Cadeau de l\'administrateur')).slice(0, 120);
     const kind = g.kind === 'wheel' ? 'wheel' : 'admin'; // the shop never pays tokens for these XP
     p.history.unshift({ title, xp: delta, at: Date.now(), kind });
-    p.history = p.history.slice(0, 40);
+    p.history = p.history.slice(0, 100); // long enough to count a week of challenges (duels)
     this.store.save();
     const info = this.levelInfo();
     const ranks = this.ranks();

@@ -29,6 +29,19 @@ async function lookup(name) {
   return close ? close.id : null;
 }
 
+/** French short description of a Steam game (HTML stripped), or null. */
+async function steamDescription(appid) {
+  const url = `https://store.steampowered.com/api/appdetails?appids=${appid}&l=french&cc=FR&filters=basic`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('details ' + r.status);
+  const j = await r.json();
+  const d = j && j[appid] && j[appid].success && j[appid].data;
+  const t = d && (d.short_description || '');
+  if (!t) return null;
+  return t.replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim() || null;
+}
+
 class Covers {
   constructor(store) { this.store = store; this.busy = false; }
 
@@ -58,6 +71,38 @@ class Covers {
         await new Promise((r) => setTimeout(r, 400));
       }
     } finally { this.busy = false; }
+  }
+
+  get descCache() { return this.store.data.descCache || (this.store.data.descCache = {}); }
+
+  /** Clean description found for a game whose own one was damaged, if already known. */
+  description(g) {
+    const c = this.descCache[g.id];
+    return c && c.text ? c.text : null;
+  }
+
+  /**
+   * Games whose launcher description is damaged (descBroken, see scanners/epic.js): their
+   * French description is taken from the Steam store, found by the game's name. Cached.
+   */
+  async fillDescriptions(games, onFound) {
+    if (this.busyDesc) return;
+    this.busyDesc = true;
+    try {
+      for (const g of games) {
+        if (!g.descBroken) continue;
+        const c = this.descCache[g.id];
+        if (c && (c.text || Date.now() - c.at < RETRY_MS)) continue;
+        try {
+          const appid = await lookup(g.name);
+          const text = appid ? await steamDescription(appid) : null;
+          this.descCache[g.id] = { text, appid, at: Date.now() };
+          this.store.save();
+          if (text && onFound) onFound();
+        } catch { /* offline: try again next launch */ }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } finally { this.busyDesc = false; }
   }
 }
 

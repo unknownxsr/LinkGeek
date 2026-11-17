@@ -20,12 +20,14 @@ const RARITIES = {
 const TIER_NAMES = ['Bronze', 'Argent', 'Or', 'Platine'];
 const DATA_VERSION = 2; // 2 = one rarity per trophy
 
+const TRACKED = 'Temps de jeu suivi par Linkgeek (Linkgeek ouvert)';
+const TIME_KEYS = ['playtime_10', 'playtime_100', 'one_game_50', 'one_game_500'];
 const T = (rarity, key, name, icon, goal, desc, metric, extra = {}) => ({ rarity, key, name, icon, tiers: [goal], desc: () => desc, metric, ...extra });
 const DEFS = [
   // ---------- Bronze: first steps ----------
   T('bronze', 'first_session', 'Premier pas', 'play', 1, 'Lancer ta première session de jeu', (c) => c.sessions, { hint: 'Sessions suivies par Linkgeek' }),
   T('bronze', 'games_3', 'Touche-à-tout', 'pad', 3, 'Jouer à 3 jeux différents', (c) => c.gamesPlayed),
-  T('bronze', 'playtime_10', 'Échauffement', 'clock', 10 * H, 'Cumuler 10 heures de jeu', (c) => c.totalSec, { unit: 'h' }),
+  T('bronze', 'playtime_10', 'Échauffement', 'clock', 10 * H, 'Cumuler 10 heures de jeu', (c) => c.totalSec, { unit: 'h', hint: TRACKED }),
   T('bronze', 'library_10', 'Petite collection', 'layers', 10, 'Avoir 10 jeux dans ta bibliothèque', (c) => c.libraryCount),
   T('bronze', 'favorite_1', 'Coup de cœur', 'star', 1, 'Mettre un jeu en favori', (c) => c.favorites),
   T('bronze', 'friend_1', 'Premier ami', 'people', 1, 'Ajouter ton premier ami', (c) => c.friends),
@@ -39,8 +41,8 @@ const DEFS = [
   T('bronze', 'secret_quick', 'Tout ça pour ça', 'hourglass', 1, 'Faire une session de jeu de moins de 30 secondes', (c) => c.quickSessions, { secret: true }),
   T('bronze', 'secret_lucky', 'Chanceux', 'clover', 1, 'Avoir un 7 dans son pseudo', (c) => c.lucky, { secret: true }),
   // ---------- Argent: a real investment ----------
-  T('silver', 'playtime_100', 'Marathonien', 'clock', 100 * H, 'Cumuler 100 heures de jeu', (c) => c.totalSec, { unit: 'h' }),
-  T('silver', 'one_game_50', 'Dévoué', 'heart', 50 * H, 'Passer 50 heures sur un même jeu', (c) => c.maxGameSec, { unit: 'h' }),
+  T('silver', 'playtime_100', 'Marathonien', 'clock', 100 * H, 'Cumuler 100 heures de jeu', (c) => c.totalSec, { unit: 'h', hint: TRACKED }),
+  T('silver', 'one_game_50', 'Dévoué', 'heart', 50 * H, 'Passer 50 heures sur un même jeu', (c) => c.maxGameSec, { unit: 'h', hint: TRACKED }),
   T('silver', 'session_3h', 'Sans pause', 'bolt', 3 * H, 'Jouer 3 heures d\'affilée', (c) => c.longestSec, { unit: 'h', hint: 'Session suivie par Linkgeek' }),
   T('silver', 'sessions_50', 'Habitué', 'play', 50, 'Lancer 50 sessions de jeu', (c) => c.sessions, { hint: 'Sessions suivies par Linkgeek' }),
   T('silver', 'days_30', 'Régulier', 'calendar', 30, 'Jouer 30 jours différents', (c) => c.days),
@@ -52,7 +54,7 @@ const DEFS = [
   T('silver', 'level_25', 'Vétéran', 'crown', 25, 'Atteindre le niveau 25', (c) => c.level),
   T('silver', 'secret_influencer', 'Influenceur', 'megaphone', 1, 'Relier tous ses réseaux (Discord, Twitch et TikTok) à son profil', (c) => c.allSocials, { secret: true }),
   // ---------- Or: for the dedicated ----------
-  T('gold', 'one_game_500', 'Légende vivante', 'crown', 500 * H, 'Passer 500 heures sur un même jeu', (c) => c.maxGameSec, { unit: 'h' }),
+  T('gold', 'one_game_500', 'Légende vivante', 'crown', 500 * H, 'Passer 500 heures sur un même jeu', (c) => c.maxGameSec, { unit: 'h', hint: TRACKED }),
   T('gold', 'session_8h', 'Increvable', 'bolt', 8 * H, 'Jouer 8 heures d\'affilée', (c) => c.longestSec, { unit: 'h', hint: 'Session suivie par Linkgeek' }),
   T('gold', 'streak_30', 'Assidu', 'calendar', 30, 'Jouer 30 jours de suite', (c) => c.bestStreak, { hint: 'Une partie suivie par Linkgeek chaque jour' }),
   T('gold', 'challenges_100', 'Chasseur de défis', 'compass', 100, 'Terminer 100 défis', (c) => c.challengesDone),
@@ -88,6 +90,12 @@ class Achievements {
       a.unlocked = {};
       a.initialized = false;
       a.v = DATA_VERSION;
+    }
+    if (!a.trackedTime) {
+      // playtime trophies now count only the time played with Linkgeek open: the progress
+      // remembered from the platforms' counters is dropped (trophies already won stay won)
+      for (const k of TIME_KEYS) if (a.unlocked[k] && !a.unlocked[k].tier) a.unlocked[k].best = 0;
+      a.trackedTime = 1;
     }
     return a;
   }
@@ -136,8 +144,9 @@ class Achievements {
       allSocials: soc.discord && soc.twitch && soc.tiktok ? 1 : 0,
       playedWith: Object.keys(this.data.playedWith).length,
       gamesPlayed: played.length,
-      totalSec: games.reduce((a, g) => a + (g.playtimeSec || 0), 0),
-      maxGameSec: games.reduce((a, g) => Math.max(a, g.playtimeSec || 0), 0),
+      // playtime counted only while Linkgeek was open (not the platforms' own counters)
+      totalSec: games.reduce((a, g) => a + (g.trackedSec || 0), 0),
+      maxGameSec: games.reduce((a, g) => Math.max(a, g.trackedSec || 0), 0),
       longestSec: sessions.reduce((a, s) => Math.max(a, (s.end - s.start) / 1000), 0),
       sessions: sessions.length,
       days: days.size,

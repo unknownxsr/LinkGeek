@@ -1,5 +1,5 @@
 /**
- * Shop: themes bought with tokens ("jetons").
+ * Shop: themes bought with tokens ("Geek Coins").
  * Tokens are earned by completing challenges (1 token per 8 XP) and by reaching
  * new levels (20 + 5 × level). XP gifts from the admin do not give tokens for
  * the challenge part. Everything is stored locally in store.data.shop.
@@ -121,7 +121,7 @@ class Shop {
     if (!f) throw new Error('Contour introuvable');
     const s = this.data;
     if (s.frames.includes(id)) throw new Error('Tu possèdes déjà ce contour');
-    if (s.coins < f.price) throw new Error(`Il te manque ${f.price - s.coins} jetons`);
+    if (s.coins < f.price) throw new Error(`Il te manque ${f.price - s.coins} Geek Coins`);
     s.coins -= f.price;
     s.frames.push(id);
     s.log.unshift({ at: Date.now(), n: -f.price, why: `Achat : contour ${f.name}` });
@@ -227,7 +227,7 @@ class Shop {
       const need = (RARITIES[t.rarity] || RARITIES.common).minLevel;
       if (level < need) throw new Error(`Il faut être niveau ${need} pour acheter un thème ${RARITIES[t.rarity].name.toLowerCase()}`);
     }
-    if (s.coins < t.price) throw new Error(`Il te manque ${t.price - s.coins} jetons`);
+    if (s.coins < t.price) throw new Error(`Il te manque ${t.price - s.coins} Geek Coins`);
     s.coins -= t.price;
     s.owned.push(id);
     s.log.unshift({ at: Date.now(), n: -t.price, why: `Achat : thème ${t.name}` });
@@ -261,7 +261,7 @@ class Shop {
     let prize = WHEEL[0];
     for (const p of WHEEL) { if (r < p.w) { prize = p; break; } r -= p.w; }
     const out = { key: prize.key, kind: prize.kind, n: prize.n };
-    if (prize.kind === 'coins') this.add(prize.n, `Roulette : ${prize.n} jetons`);
+    if (prize.kind === 'coins') this.add(prize.n, `Roulette : ${prize.n} Geek Coins`);
     if (prize.kind === 'theme') {
       const left = THEMES.filter((t) => !s.owned.includes(t.id));
       if (left.length) {
@@ -276,7 +276,7 @@ class Shop {
         s.log = s.log.slice(0, 40);
         out.theme = { id: t.id, name: t.name };
       } else {
-        this.add(THEME_DUPLICATE, 'Roulette : thème (tous déjà possédés) remplacé par des jetons');
+        this.add(THEME_DUPLICATE, 'Roulette : thème (tous déjà possédés) remplacé par des Geek Coins');
         out.duplicate = THEME_DUPLICATE;
       }
     }

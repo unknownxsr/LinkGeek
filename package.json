@@ -1,7 +1,7 @@
 {
   "name": "linkgeek",
   "productName": "Linkgeek",
-  "version": "1.8.5",
+  "version": "1.9.0",
   "description": "Launcher de jeux unifié : Steam, Epic Games, Xbox / Game Pass, Battle.net, Ubisoft Connect, EA app, GOG et jeux ajoutés à la main, avec statistiques, succès, défis et amis.",
   "main": "main.js",
   "author": "Zenshyy",
@@ -35,7 +35,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.png",
+      "icon": "assets/icon.ico",
       "signAndEditExecutable": false
     },
     "asar": false,
@@ -50,6 +50,7 @@
       "deleteAppDataOnUninstall": false,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
+      "include": "build/installer.nsh",
       "artifactName": "Linkgeek-Setup-${version}.${ext}"
     },
     "files": [

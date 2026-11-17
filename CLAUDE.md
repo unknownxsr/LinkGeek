@@ -14,6 +14,8 @@ Node is not always on PATH in the tool shell. In PowerShell, start with:
 `$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')`
 
 - `npm start`: development mode.
+- Icons: `assets/icon.png` (512) and `assets/icon.ico` (16 to 256) are generated from `assets/logo-source.png` by `build/make-icons.ps1`.
+- **Never modify `Linkgeek.exe` after the build** (no rcedit, keep `"signAndEditExecutable": false`): it must stay byte-identical to Electron's `electron.exe`, otherwise Smart App Control blocks it. So the exe keeps Electron's icon; the logo comes from the window `icon` + `app.setAppUserModelId`, and from the shortcuts: `install.ps1` (`icon.ico`) and, for the NSIS installer, `build/installer.nsh` (`nsis.include`, recreates the shortcuts with `resources\app\assets\icon.ico`). Building the NSIS installer locally fails on this PC (electron-builder runs a freshly built unsigned exe, blocked by Smart App Control); it works on GitHub Actions.
 - `npm run setup`: builds `dist\Linkgeek-Setup` and `.zip`. This is a folder build plus `install.ps1`, the format used to install on the developer's PC (see below). It bundles `%APPDATA%\Linkgeek\online-config.json`.
 - `dist\Linkgeek-Setup\install.ps1 -Silent`: installs into `%LOCALAPPDATA%\Programs\Linkgeek`. Close Linkgeek first.
 - `npm run dist`: builds the NSIS `.exe` for GitHub Releases. See PUBLIER.md.

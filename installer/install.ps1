@@ -26,11 +26,17 @@ $Legacy = 'Nexus Launcher'
 $LegacyStartup = Join-Path ([Environment]::GetFolderPath('Startup')) "$Legacy.lnk"
 $hadLegacyStartup = Test-Path $LegacyStartup
 
+$DesktopLnk = Join-Path $Desktop "$AppName.lnk"
+$alreadyInstalled = Test-Path $Exe
 if (-not $Silent) {
-  $r = Read-Host '  Lancer Linkgeek au demarrage de Windows (suivi du temps de jeu en continu) ? [O/n]'
+  $r = Read-Host '  Creer un raccourci sur le Bureau ? [O/n]'
+  $DesktopShortcut = ($r -eq '' -or $r -match '^[oOyY]')
+  $r = Read-Host '  Lancer Linkgeek au demarrage de l''ordinateur (suivi du temps de jeu en continu) ? [O/n]'
   $Startup = ($r -eq '' -or $r -match '^[oOyY]')
-} elseif (-not $PSBoundParameters.ContainsKey('Startup')) {
-  $Startup = (Test-Path $StartupLnk) -or $hadLegacyStartup   # silent update: keep the user's previous choice
+} else {
+  # silent update: keep the user's previous choices (first install: Desktop shortcut yes)
+  $DesktopShortcut = (-not $alreadyInstalled) -or (Test-Path $DesktopLnk)
+  if (-not $PSBoundParameters.ContainsKey('Startup')) { $Startup = (Test-Path $StartupLnk) -or $hadLegacyStartup }
 }
 
 Write-Step 'Fermeture de Linkgeek s''il est ouvert'
@@ -49,7 +55,9 @@ if ((Test-Path $LegacyDir) -or $hadLegacyStartup) {
 
 Write-Step 'Copie des fichiers'
 New-Item -ItemType Directory -Force $Dest | Out-Null
-robocopy $Src $Dest /MIR /NFL /NDL /NJH /NJS /NP /XF uninstall.ps1 Desinstaller.cmd icon.ico | Out-Null
+# Keep the 3 files of the install folder's root that are not in the package (full paths: a bare
+# "icon.ico" would also skip resources\app\assets\icon.ico, the app's own icon)
+robocopy $Src $Dest /MIR /NFL /NDL /NJH /NJS /NP /XF (Join-Path $Dest 'uninstall.ps1') (Join-Path $Dest 'Desinstaller.cmd') (Join-Path $Dest 'icon.ico') | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "La copie a echoue (robocopy $LASTEXITCODE)" }
 Copy-Item (Join-Path $PSScriptRoot 'icon.ico') $Icon -Force
 Copy-Item (Join-Path $PSScriptRoot 'uninstall.ps1') (Join-Path $Dest 'uninstall.ps1') -Force
@@ -63,9 +71,11 @@ function New-Shortcut($path, $arguments) {
   $sc.IconLocation = "$Icon,0"; $sc.Description = $AppName; $sc.Save()
 }
 New-Item -ItemType Directory -Force $StartDir | Out-Null
-New-Shortcut (Join-Path $Desktop "$AppName.lnk") ''
+if ($DesktopShortcut) { New-Shortcut $DesktopLnk '' } elseif (Test-Path $DesktopLnk) { Remove-Item $DesktopLnk -Force }
 New-Shortcut (Join-Path $StartDir "$AppName.lnk") ''
 if ($Startup) { New-Shortcut $StartupLnk '--hidden' } elseif (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
+# Windows keeps shortcut icons in a cache: ask it to refresh them (new logo shown right away)
+try { Start-Process -FilePath "$env:SystemRoot\System32\ie4uinit.exe" -ArgumentList '-show' -WindowStyle Hidden -Wait -ErrorAction Stop } catch { }
 
 Write-Step 'Enregistrement dans Applications installees'
 $size = [int]((Get-ChildItem $Dest -Recurse -File | Measure-Object Length -Sum).Sum / 1KB)

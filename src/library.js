@@ -114,6 +114,8 @@ class Library {
         ...g,
         ...(found ? { hero: g.hero || found.hero, header: g.header || found.header } : {}),
         name: ov.name || g.name,
+        // a damaged launcher description is replaced by a clean one when found (covers.js)
+        description: g.description || (g.descBroken && this.covers ? this.covers.description(g) : null) || null,
         cover: ov.cover || g.cover || (found && found.cover) || null,
         addedAt: (d.firstSeen && d.firstSeen[g.id]) || 0,
         // genres used by the profile titles (detected, or chosen by the player)

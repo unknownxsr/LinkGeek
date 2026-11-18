@@ -4097,7 +4097,7 @@ function firebaseDetails(s) {
       <li><b>Realtime Database</b> → Créer une base de données → onglet <b>Règles</b> : remplace tout par les règles de Linkgeek <button class="link inline" data-acc="fb-rules">📋 Copier les règles</button>, puis <b>Publier</b>.</li>
       <li>Paramètres du projet → <b>Ajouter une app Web</b> (&lt;/&gt;) → copie le bloc <span class="mono">firebaseConfig</span> et colle-le ici :</li>
     </ol>
-    <textarea id="fb-config" class="fb-config" spellcheck="false" placeholder="const firebaseConfig = {&#10;  apiKey: &quot;AIza…&quot;,&#10;  databaseURL: &quot;https://ton-projet-default-rtdb.europe-west1.firebasedatabase.app&quot;,&#10;  projectId: &quot;ton-projet&quot;, …&#10;};"></textarea>
+    <textarea id="fb-config" class="fb-config" spellcheck="false" placeholder="const firebaseConfig = {&#10;  apiKey: &quot;AIza…&quot;,&#10;  databaseURL: &quot;https://my-project-default-rtdb.europe-west1.firebasedatabase.app&quot;,&#10;  projectId: &quot;my-project&quot;, …&#10;};"></textarea>
     <div class="set-actions"><button class="ghost primary-soft" data-acc="fb-save">Enregistrer</button>${f.source === 'settings' ? '<button class="ghost danger" data-acc="fb-clear">Effacer</button>' : ''}</div>
     <p class="set-note">Pour que tes amis puissent se connecter, publie aussi ton écran de consentement OAuth (Google Cloud → Écran de consentement → <b>Publier l'application</b>). Les autorisations utilisées (nom, e-mail, photo) ne demandent pas de validation par Google.</p>
   </details>`;

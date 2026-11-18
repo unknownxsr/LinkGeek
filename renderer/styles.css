@@ -2331,7 +2331,9 @@ svg.cs { stroke: none; fill: initial; flex-shrink: 1; }
 .dup-modal .row { margin-top: 16px; }
 
 /* ---- Mode « en jeu »: everything stands still while a game runs (CPU / GPU left to the game) ---- */
-html.in-game *, html.in-game *::before, html.in-game *::after { animation-play-state: paused !important; transition: none !important; }
+/* Animations jump straight to their end instead of being paused: a paused entrance animation (the page
+   fade-in starts at opacity 0) would leave the page invisible when the window is opened during a game. */
+html.in-game *, html.in-game *::before, html.in-game *::after { animation-duration: 0s !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important; }
 html.in-game #theme-fx { display: none; }
 
 /* ---- Login streak pop-up ---- */

@@ -657,6 +657,7 @@
     'Défi du jour terminé': 'Daily challenge completed',
     'Description': 'Description',
     'Menu': 'Menu',
+    'Administrateur': 'Admin', 'XP ajoutée (admin)': 'XP added (admin)', 'XP retirée (admin)': 'XP removed (admin)',
   };
 
   // [pattern, replacement]: text with numbers, names or dates
@@ -850,7 +851,7 @@
     [/^Niveau (\d+) · (.+)$/, (m, a, b) => `Level ${a} · ${tr(b)}`],
     [/^Niveau (\d+)$/, 'Level $1'],
     [/^([\d\s  ,.]+ ?h(?: \d+ min)?|[\d]+ min) de jeu au total$/, '$1 played in total'],
-    [/^(\d+) jeux? · (.+) de jeu · (.+)$/, '$1 games · $2 played · $3'],
+    [/^(\d+) jeux? · (.+) de jeu · (.+)$/, (m, n, a, b) => `${n} ${n === '1' ? 'game' : 'games'} · ${a} played · ${tr(b)}`],
     [/^(\d+) jeux? lancés?$/, '$1 games launched'],
     [/^(\d+) (jeu|jeux) · (.+)$/, (m, a, b, c) => `${a} game${a === '1' ? '' : 's'} · ${tr(c)}`],
     [/^(\d+) en ligne · (\d+) amis?$/, '$1 online · $2 friend(s)'],
@@ -1017,7 +1018,26 @@
   const LANGS = ['en', 'es', 'de', 'ru'];
   let cur = null;
   let T = tr;
-  const active = (s) => T(s);
+  // English writes decimals with a dot: "4,7 Go" → "4.7 GB", "9,5 h" → "9.5 h" (1 or 2 decimals only,
+  // so a thousands separator like "1,229 h" is never touched). Spanish, German and Russian keep the comma.
+  // Prices are left alone: fmtMoney already writes them in the player's country format.
+  const dotDecimals = (s) => (typeof s === 'string' ? s.replace(/(\d),(\d{1,2})(?!\d)(?=\s?(?:[KMGT]B|h\b|%|min\b))/g, '$1.$2') : s);
+  // "1 day(s)" → "1 day", "3 day(s)" → "3 days" (also "juego(s)", "Spiel(e)"): the number just before decides.
+  // Russian has its own plural forms in its file, so it is left alone.
+  const fixPlurals = (s) => {
+    if (typeof s !== 'string' || !/\w\((?:s|es|e|en|n)\)/.test(s)) return s;
+    return s.replace(/(\w)\((s|es|e|en|n)\)/g, (m, ch, suf, off) => {
+      const nums = s.slice(0, off).match(/\d[\d   ,.]*/g);
+      if (!nums) return ch + suf;
+      const n = parseFloat(nums[nums.length - 1].replace(/[   ]/g, '').replace(',', '.'));
+      return ch + (n === 1 ? '' : suf);
+    });
+  };
+  const active = (s) => {
+    const r = T(s);
+    if (cur === 'en') return fixPlurals(dotDecimals(r));
+    return cur === 'es' || cur === 'de' ? fixPlurals(r) : r;
+  };
 
   // user text (chat messages…) is marked translate="no": never touched
   const keep = (el) => !!(el && el.closest && el.closest('[translate="no"]'));

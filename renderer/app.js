@@ -1138,7 +1138,7 @@ function viewGame() {
           </div>
         </div>
         ${newsPanel(g)}
-        ${g.description ? `<div class="panel" style="margin-top:16px"><h2>À propos</h2><p>${esc(g.description)}</p></div>` : ''}
+        ${g.description ? `<div class="panel" style="margin-top:16px"><h2>Description</h2><p>${esc(g.description)}</p></div>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div class="panel">
@@ -1626,6 +1626,8 @@ function openWrapped(i) {
   const root = $('#modal-root');
   let idx = 0; let timer = null;
   const show = (n) => {
+    // the recap was replaced (another window, a page change…): stop its timer and keyboard shortcuts
+    if (!root.querySelector('.wrapped .w-stage')) { clearTimeout(timer); document.removeEventListener('keydown', key); return; }
     idx = Math.max(0, Math.min(slides.length - 1, n));
     const s = slides[idx];
     root.querySelector('.w-stage').innerHTML = `<div class="w-slide ${s.cls}">${s.bg ? `<div class="w-bg" style="background-image:url('${esc(s.bg)}')"></div>` : ''}<div class="w-in">${s.html}</div></div>`;
@@ -1641,7 +1643,10 @@ function openWrapped(i) {
     <button class="w-nav prev" data-w="prev" aria-label="Précédent"></button><button class="w-nav next" data-w="next" aria-label="Suivant"></button>
   </div></div>`;
   const close = () => { clearTimeout(timer); root.innerHTML = ''; root.onclick = null; document.removeEventListener('keydown', key); };
-  const key = (e) => { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') show(idx + 1); if (e.key === 'ArrowLeft') show(idx - 1); };
+  const key = (e) => {
+    if (!root.querySelector('.wrapped')) { clearTimeout(timer); document.removeEventListener('keydown', key); return; }
+    if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') show(idx + 1); if (e.key === 'ArrowLeft') show(idx - 1);
+  };
   document.addEventListener('keydown', key);
   root.onclick = async (e) => {
     if (e.target.classList.contains('w-bg-root')) return close();
@@ -1697,7 +1702,7 @@ function viewStats() {
       <div class="wrap-btns">${wrappedButtons()}</div></div>
     <div class="kpis">
       ${(() => { const tracked = games.filter((g) => !OWN_PLAYTIME.has(g.source)).reduce((a, g) => a + g.playtimeSec, 0); return kpi(I.clock, 'Temps de jeu total', fmtHours(t.time), tracked ? `Steam + ${fmtHours(tracked)} suivies par Linkgeek` : 'Temps Steam · les autres jeux se comptent quand Linkgeek est ouvert'); })()}
-      ${kpi(I.bolt, 'Cette semaine', week ? fmtTime(week) : '—', 'suivi par Linkgeek')}
+      ${kpi(I.bolt, 'Cette semaine', week ? fmtTime(week) : '—', 'Suivi par Linkgeek')}
       ${kpi(I.disk, 'Espace occupé', fmtSize(t.size), `${games.filter((g) => !g.sizeBytes).length ? games.filter((g) => !g.sizeBytes).length + ' taille(s) en calcul' : 'tous les jeux mesurés'}`)}
       ${kpi(I.layers, 'Jeux installés', String(t.count), `${played.length} déjà lancés · ${t.count - played.length} jamais joués`)}
     </div>

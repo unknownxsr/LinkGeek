@@ -639,6 +639,24 @@
     'Code copié : colle-le après /lier sur Discord': 'Code copied: paste it after /lier on Discord',
     'Compte Discord délié : tes rôles de rang seront retirés': 'Discord account unlinked: your rank roles will be removed',
     'Connecte-toi au mode en ligne pour lier ton compte Discord': 'Sign in to online mode to link your Discord account',
+    // 2.0 review: tooltips, notification history, admin
+    "Déplacer ou masquer les blocs de l'accueil (tu peux aussi maintenir un bloc pour le déplacer)": 'Move or hide the home blocks (you can also hold a block to move it)',
+    "Pendant ce jeu, aucune notification d'amis (réglage « Ne pas déranger » → Parties classées)": 'No friend notifications during this game ("Do not disturb" setting → Ranked games)',
+    'Actualiser les scores': 'Refresh the scores',
+    'Chaque carte en version sans skin, avec skin et holo': 'Every card in its no-skin, skin and holo versions',
+    'Versions obtenues (sans skin, avec skin, holo)': 'Versions owned (no skin, skin, holo)',
+    'Précédent': 'Previous',
+    'Voir ton profil comme tes amis le voient quand ils cliquent sur toi': 'See your profile the way your friends see it when they click on you',
+    'Modifier la photo, le pseudo, le titre, le contour, les réseaux et les jeux préférés': 'Edit the picture, username, title, frame, socials and favorite games',
+    'Ouvrir des boosters': 'Open boosters',
+    'Code ami': 'Friend code',
+    'Bravo pour le tournoi !': 'Well done in the tournament!',
+    'Niveau supérieur !': 'Level up!',
+    'Défi unique terminé': 'One-time challenge completed',
+    'Défi de la semaine terminé': 'Weekly challenge completed',
+    'Défi du jour terminé': 'Daily challenge completed',
+    'Description': 'Description',
+    'Menu': 'Menu',
   };
 
   // [pattern, replacement]: text with numbers, names or dates
@@ -957,6 +975,14 @@
     [/^Disque (\S+)$/, 'Drive $1'],
     [/^(\d+) (Commune|Rare|Épique|Légendaire|Mythique)s?$/, (m, n, r) => `${n} ${tr(r)}`],
     [/^Autres (\d.+)$/, (m, a) => `Other ${tr(a)}`],
+    // 2.0 review
+    [/^Jeu (\d+)$/, 'Game $1'],
+    [/^Inviter (.+) à jouer$/, 'Invite $1 to play'],
+    [/^(\S+) (\d+) h : (.+) \(12 dernières semaines\)$/, (m, d, h, v) => `${tr(d)} ${h}:00 · ${v === 'rien' ? 'nothing' : v} (last 12 weeks)`],
+    [/^Débloqué au niveau (\d+)$/, 'Unlocked at level $1'],
+    [/^Choisir le jeu n°(\d+)$/, 'Choose game #$1'],
+    [/^(\d[\d  ]* h(?: \d+ min)?|\d+ min) de jeu$/, '$1 played'],
+    [/^(\d+) h – (\d+) h$/, '$1:00 – $2:00'],
   ];
 
   const MONTHS = { janvier: 'January', février: 'February', mars: 'March', avril: 'April', mai: 'May', juin: 'June', juillet: 'July', août: 'August', septembre: 'September', octobre: 'October', novembre: 'November', décembre: 'December' };
@@ -1000,7 +1026,15 @@
     const raw = node.nodeValue;
     if (!raw || !/[A-Za-zÀ-ÿ]/.test(raw)) return;
     const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
-    const t = active(m[2]);
+    let t = active(m[2]);
+    // a piece of sentence before a tag ("t'invite à jouer à <b>…"): the phrase is stored with its trailing space
+    if (t === m[2] && m[3]) { const t2 = active(m[2] + ' '); if (t2 !== m[2] + ' ') t = t2.replace(/\s+$/, ''); }
+    // …and after a tag ("<b>CODE</b> dans Amis : …"): stored with its leading space
+    if (t === m[2] && m[1]) { const t2 = active(' ' + m[2]); if (t2 !== ' ' + m[2]) t = t2.replace(/^\s+/, ''); }
+    // "· il y a 10 min" after a tag ("<b>Valorant</b> · il y a 10 min")
+    if (t === m[2] && m[2].startsWith('· ')) { const r = active(m[2].slice(2)); if (r !== m[2].slice(2)) t = '· ' + r; }
+    // an emoji in front of the phrase ("🎮 Qui joue le plus à … ?")
+    if (t === m[2]) { const e = m[2].match(/^(\p{Extended_Pictographic}️?\s+)([\s\S]+)$/u); if (e) { const r = active(e[2]); if (r !== e[2]) t = e[1] + r; } }
     if (t !== m[2]) { ORIG.set(node, raw); node.nodeValue = m[1] + t + m[3]; }
   }
 
